@@ -1,0 +1,128 @@
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+# Use tomllib from standard library in Python 3.11+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    # Use tomli for older versions if needed, though we require >= 3.11
+    import tomllib
+
+@dataclass
+class LLMConfig:
+    provider: str = 'ollama'
+    url: str = 'http://localhost:11434'
+    model: str = 'gemma3:12b'
+    temperature: float = 0.2
+    timeout_seconds: int = 120
+    max_retries: int = 3
+
+@dataclass
+class ReconsolidationConfig:
+    enabled: bool = True
+    lability_threshold: float = 0.35
+    lability_window: str = 'session'
+    check_on_load: bool = True
+
+@dataclass
+class DreamConfig:
+    schedule: str = 'post_session'
+    cron_expression: str = '0 2 * * *'
+    strategy: str = 'full'
+    conflict_policy: str = 'fork'
+    max_pages_per_run: int = 20
+
+@dataclass
+class DecayConfig:
+    interval_hours: int = 6
+    archive_threshold: float = 0.10
+    log_threshold: float = 0.05
+    half_life_hours: int = 168
+
+from typing import Optional
+
+@dataclass
+class Config:
+    store_path: Path = Path('./mnemos_store')
+    git_commits: bool = False
+    context_budget_tokens: int = 8192
+    min_importance_to_encode: float = 0.3
+    llm: Optional[LLMConfig] = None
+    reconsolidation: Optional[ReconsolidationConfig] = None
+    dream: Optional[DreamConfig] = None
+    decay: Optional[DecayConfig] = None
+
+    def __post_init__(self):
+        if self.llm is None:
+            self.llm = LLMConfig()
+        if self.reconsolidation is None:
+            self.reconsolidation = ReconsolidationConfig()
+        if self.dream is None:
+            self.dream = DreamConfig()
+        if self.decay is None:
+            self.decay = DecayConfig()
+
+    @classmethod
+    def from_toml(cls, path: Path) -> 'Config':
+        """Loads config from mnemos.toml, returns Config with defaults for missing keys."""
+        if not path.exists():
+            return cls.defaults()
+        
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+            
+        store_path = Path(data.get('store', {}).get('path', './mnemos_store'))
+        git_commits = data.get('store', {}).get('git_commits', False)
+        context_budget_tokens = data.get('session', {}).get('context_budget_tokens', 8192)
+        min_importance_to_encode = data.get('session', {}).get('min_importance_to_encode', 0.3)
+        
+        llm_data = data.get('llm', {})
+        llm = LLMConfig(
+            provider=llm_data.get('provider', 'ollama'),
+            url=llm_data.get('url', 'http://localhost:11434'),
+            model=llm_data.get('model', 'gemma3:12b'),
+            temperature=llm_data.get('temperature', 0.2),
+            timeout_seconds=llm_data.get('timeout_seconds', 120),
+            max_retries=llm_data.get('max_retries', 3)
+        )
+        
+        recon_data = data.get('reconsolidation', {})
+        reconsolidation = ReconsolidationConfig(
+            enabled=recon_data.get('enabled', True),
+            lability_threshold=recon_data.get('lability_threshold', 0.35),
+            lability_window=recon_data.get('lability_window', 'session'),
+            check_on_load=recon_data.get('check_on_load', True)
+        )
+        
+        dream_data = data.get('dream', {})
+        dream = DreamConfig(
+            schedule=dream_data.get('schedule', 'post_session'),
+            cron_expression=dream_data.get('cron_expression', '0 2 * * *'),
+            strategy=dream_data.get('strategy', 'full'),
+            conflict_policy=dream_data.get('conflict_policy', 'fork'),
+            max_pages_per_run=dream_data.get('max_pages_per_run', 20)
+        )
+        
+        decay_data = data.get('decay', {})
+        decay = DecayConfig(
+            interval_hours=decay_data.get('interval_hours', 6),
+            archive_threshold=decay_data.get('archive_threshold', 0.10),
+            log_threshold=decay_data.get('log_threshold', 0.05),
+            half_life_hours=decay_data.get('half_life_hours', 168)
+        )
+        
+        return cls(
+            store_path=store_path,
+            git_commits=git_commits,
+            context_budget_tokens=context_budget_tokens,
+            min_importance_to_encode=min_importance_to_encode,
+            llm=llm,
+            reconsolidation=reconsolidation,
+            dream=dream,
+            decay=decay
+        )
+
+    @classmethod
+    def defaults(cls) -> 'Config':
+        return cls()
