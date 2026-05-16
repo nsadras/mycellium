@@ -14,18 +14,26 @@ A neurobiologically-inspired, dependency-light memory system for LLM agents. Bui
 
 ```text
 mycelium/
-├── mycelium/           # Core Library
-│   ├── core.py         # Main Client (Mycelium)
-│   ├── session.py      # Session Context Manager
-│   ├── store.py        # File I/O (Wiki & Logs)
-│   ├── encoder.py      # Raw event encoding
-│   ├── reconsolidation.py # Prediction error & lability logic
-│   ├── dream.py        # Consolidation & Dream process
-│   └── decay.py        # Forgetting curve engine
+├── mycelium/           # Core Library (MnemOS)
+├── server/             # FastAPI Backend
+│   └── api/            # API Routers (Sessions, Memory)
+├── ui/                 # React Frontend (Vite + TS + Tailwind)
+│   └── src/components/ # Chat, Wiki, and Log Explorers
 ├── tests/              # Comprehensive test suite
 ├── examples/           # Integration examples
+├── start.sh            # Unified startup script
 └── pyproject.toml      # uv/hatchling configuration
 ```
+
+## Web Interface
+
+Mycelium includes a built-in web-based UI for managing agent interactions and inspecting memory artifacts.
+
+### Features
+- **Session Management:** Start, resume, and track multiple agent conversations.
+- **Wiki Explorer:** Browse semantic memory pages with full Markdown support.
+- **Log Viewer:** Inspect raw daily episodic logs.
+- **Manual Dream:** Trigger memory consolidation and decay manually from the UI.
 
 ## Quick Start
 
@@ -33,7 +41,18 @@ mycelium/
 - Python 3.11+
 - [Ollama](https://ollama.ai/) running locally (recommended model: `gemma3:12b`)
 
-### 2. Basic Usage
+### 2. Running the UI
+
+The easiest way to get started is by running the unified startup script:
+
+```bash
+./start.sh
+ ```
+
+- **Frontend:** http://localhost:5173
+- **Backend API:** http://localhost:8000
+
+### 3. Library Usage
 
 ```python
 import asyncio

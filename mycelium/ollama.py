@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import re
 from typing import Dict, Any, Union, Optional
 import httpx
 
@@ -14,19 +15,50 @@ class OllamaClient:
         self.timeout = timeout
         self._call_log: list[dict] = []
 
+    def _extract_json(self, content: str) -> Union[dict, list]:
+        """
+        Extracts JSON from a string, handling potential markdown fences.
+        """
+        content = content.strip()
+        
+        # Remove markdown code fences if present
+        if content.startswith("```"):
+            # Find the end of the first line (e.g., ```json)
+            first_line_end = content.find("\n")
+            if first_line_end != -1:
+                content = content[first_line_end:].strip()
+            
+            # Remove the closing fences
+            if content.endswith("```"):
+                content = content[:-3].strip()
+
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If standard parsing fails, try a simple regex for the first { or [ to the last } or ]
+            # as a last resort fallback for models that still add preambles.
+            match = re.search(r'([\[{].*[\]}])', content, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    pass
+            raise
+
     async def call(
         self,
         system: str,
         user: str,
-        expect_json: bool = False,
+        expect_json: Union[bool, dict] = False,
         max_retries: int = 3,
         temperature: Optional[float] = None
     ) -> Union[str, dict]:
         """
         Makes a chat completion call to Ollama.
+        If expect_json is a dict, it is passed as a JSON Schema to constrain output.
         """
         sys_prompt = system
-        if expect_json:
+        if expect_json is True:
             sys_prompt += "\n\nRespond with valid JSON only. No markdown, no explanation, no preamble."
             
         temp = temperature if temperature is not None else self.temperature
@@ -44,7 +76,10 @@ class OllamaClient:
         }
         
         if expect_json:
-            payload["format"] = "json"
+            if isinstance(expect_json, dict):
+                payload["format"] = expect_json
+            else:
+                payload["format"] = "json"
 
         endpoint = f"{self.url}/api/chat"
         
@@ -62,10 +97,10 @@ class OllamaClient:
                 
                 if expect_json:
                     try:
-                        parsed = json.loads(content)
+                        parsed = self._extract_json(content)
                         self._log_call(sys_prompt, user, content, latency_ms, True)
                         return parsed
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, ValueError):
                         self._log_call(sys_prompt, user, content, latency_ms, False)
                         if attempt == max_retries - 1:
                             raise ValueError(f"Failed to parse JSON response from Ollama after {max_retries} attempts: {content}")
@@ -88,14 +123,12 @@ class OllamaClient:
         max_retries: int = 3,
     ) -> dict:
         """
-        Like call() with expect_json=True, but could optionally validate against JSON schema.
-        For now, we just pass the schema into the system prompt and rely on expect_json.
+        Uses Ollama's native JSON Schema support to constrain output.
         """
-        sys_with_schema = f"{system}\n\nExpected JSON schema:\n{json.dumps(schema, indent=2)}"
         return await self.call(
-            system=sys_with_schema,
+            system=system,
             user=user,
-            expect_json=True,
+            expect_json=schema,
             max_retries=max_retries
         )
 

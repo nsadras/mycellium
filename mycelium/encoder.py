@@ -8,6 +8,16 @@ from mycelium.ollama import OllamaClient
 from mycelium.config import Config
 from mycelium import prompts
 
+ALWAYS_ENCODE_TYPES = {
+    "user_profile",
+    "preference",
+    "goal",
+    "project_fact",
+    "decision",
+    "open_question",
+    "task_state",
+}
+
 class Encoder:
     def __init__(self, llm: OllamaClient, wiki_store: WikiStore, log_store: LogStore, config: Config):
         self.llm = llm
@@ -32,13 +42,24 @@ class Encoder:
                 "type": "object",
                 "properties": {
                     "content": {"type": "string"},
+                    "memory_type": {
+                        "type": "string",
+                        "enum": [
+                            "user_profile", "preference", "goal", "project_fact",
+                            "concept", "decision", "open_question", "task_state", "other"
+                        ]
+                    },
+                    "durability": {
+                        "type": "string",
+                        "enum": ["ephemeral", "session", "durable"]
+                    },
                     "importance": {"type": "number"},
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"}
                     }
                 },
-                "required": ["content", "importance", "tags"]
+                "required": ["content", "memory_type", "durability", "importance", "tags"]
             }
         }
         
@@ -55,11 +76,18 @@ class Encoder:
                 continue
                 
             importance = float(item.get("importance", 0.0))
-            if importance < min_importance:
-                continue
-                
+            memory_type = str(item.get("memory_type", "other"))
+            durability = str(item.get("durability", "durable"))
             content = item.get("content", "").strip()
             if not content:
+                continue
+
+            should_encode = (
+                durability == "durable"
+                or memory_type in ALWAYS_ENCODE_TYPES
+                or importance >= min_importance
+            )
+            if not should_encode:
                 continue
                 
             tags = item.get("tags", [])
@@ -76,6 +104,8 @@ class Encoder:
                 importance=importance,
                 tags=tags,
                 status="raw",
+                memory_type=memory_type,  # type: ignore[arg-type]
+                durability=durability,  # type: ignore[arg-type]
                 consolidated=False,
                 decay_score=1.0
             )
@@ -91,6 +121,8 @@ class Encoder:
         session_id: str,
         importance: Optional[float] = None,
         tags: Optional[List[str]] = None,
+        memory_type: str = "other",
+        durability: str = "durable",
     ) -> LogEntry:
         
         final_importance = importance
@@ -134,6 +166,8 @@ class Encoder:
             importance=final_importance,
             tags=final_tags,
             status="raw",
+            memory_type=memory_type,  # type: ignore[arg-type]
+            durability=durability,  # type: ignore[arg-type]
             consolidated=False,
             decay_score=1.0
         )

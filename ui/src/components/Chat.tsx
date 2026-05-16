@@ -1,0 +1,223 @@
+import { useState, useEffect, useRef, type FormEvent } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Check, Pencil, Send, Plus, History, X } from 'lucide-react';
+import api, { type Session, type Message } from '../lib/api';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+interface ChatProps {
+  sessions: Session[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onCreate: (query?: string) => void;
+  onRename: (id: string, query: string) => void;
+}
+
+export default function Chat({ sessions, selectedId, onSelect, onCreate, onRename }: ChatProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (selectedId) {
+      fetchHistory(selectedId);
+    } else {
+      setMessages([]);
+    }
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const fetchHistory = async (id: string) => {
+    try {
+      const res = await api.get(`/sessions/${id}`);
+      setMessages(res.data.transcript);
+    } catch (err) {
+      console.error("Failed to fetch history", err);
+    }
+  };
+
+  const handleSend = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || !selectedId || isLoading) return;
+
+    const userMsg: Message = { role: 'user', content: input };
+    setMessages([...messages, userMsg]);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      const res = await api.post(`/sessions/${selectedId}/chat`, { message: input });
+      setMessages(prev => [...prev, { role: 'assistant', content: res.data.response }]);
+    } catch (err) {
+      console.error("Chat error", err);
+      setMessages(prev => [...prev, { role: 'assistant', content: "Error: Failed to get response from agent." }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreate = () => {
+    const name = window.prompt('Name this chat session:', 'New session');
+    if (name === null) return;
+    onCreate(name);
+  };
+
+  const startRename = (session: Session) => {
+    setEditingSessionId(session.id);
+    setEditingName(session.query);
+  };
+
+  const submitRename = () => {
+    if (!editingSessionId) return;
+    onRename(editingSessionId, editingName);
+    setEditingSessionId(null);
+    setEditingName('');
+  };
+
+  return (
+    <div className="flex flex-1 min-w-0 h-full">
+      {/* Session History Sidebar */}
+      <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
+        <div className="p-4 flex items-center justify-between border-b border-slate-200">
+          <h2 className="font-semibold text-slate-700 flex items-center gap-2">
+            <History size={16} /> Sessions
+          </h2>
+          <button onClick={handleCreate} title="New session" className="p-1 hover:bg-slate-100 rounded-md text-indigo-600 transition-colors">
+            <Plus size={20} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className={cn(
+                "group flex items-center gap-1 rounded-md text-sm transition-colors",
+                selectedId === s.id ? "bg-indigo-50 text-indigo-700 font-medium" : "hover:bg-slate-50 text-slate-600"
+              )}
+            >
+              {editingSessionId === s.id ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitRename();
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5"
+                >
+                  <input
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    className="min-w-0 flex-1 rounded border border-indigo-200 bg-white px-2 py-1 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    autoFocus
+                  />
+                  <button type="submit" title="Save name" className="p-1 text-emerald-600 hover:bg-emerald-50 rounded">
+                    <Check size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Cancel"
+                    onClick={() => setEditingSessionId(null)}
+                    className="p-1 text-slate-400 hover:bg-slate-100 rounded"
+                  >
+                    <X size={14} />
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <button
+                    onClick={() => onSelect(s.id)}
+                    className="min-w-0 flex-1 text-left px-3 py-2 truncate"
+                    title={s.query}
+                  >
+                    {s.query}
+                  </button>
+                  <button
+                    onClick={() => startRename(s)}
+                    title="Rename session"
+                    className="mr-1 p-1 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-indigo-600 rounded group-hover:opacity-100"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col bg-white">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6" ref={scrollRef}>
+          {messages.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-slate-400">
+              {selectedId ? "Start the conversation..." : "Select or create a session to start."}
+            </div>
+          ) : (
+            messages.map((m, i) => (
+              <div key={i} className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
+                <div className={cn(
+                  "max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm",
+                  m.role === 'user' 
+                    ? "bg-indigo-600 text-white rounded-br-none" 
+                    : "bg-slate-100 text-slate-800 rounded-bl-none"
+                )}>
+                  <div className="font-bold text-[10px] uppercase mb-1 opacity-70">
+                    {m.role}
+                  </div>
+                  {m.role === 'user' ? (
+                    <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                  ) : (
+                    <div className="prose prose-sm prose-slate max-w-none prose-chat">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-slate-100 text-slate-800 rounded-2xl rounded-bl-none px-4 py-3 text-sm shadow-sm flex gap-1">
+                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" />
+                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleSend} className="p-6 border-t border-slate-200">
+          <div className="relative">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={selectedId ? "Send a message..." : "Select a session first"}
+              disabled={!selectedId || isLoading}
+              className="w-full bg-slate-100 border-none rounded-xl pl-4 pr-12 py-3 focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 transition-all shadow-inner"
+            />
+            <button
+              type="submit"
+              disabled={!selectedId || !input.trim() || isLoading}
+              className="absolute right-2 top-1.5 p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors shadow-md"
+            >
+              <Send size={18} />
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

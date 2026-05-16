@@ -13,7 +13,7 @@ else:
 class LLMConfig:
     provider: str = 'ollama'
     url: str = 'http://localhost:11434'
-    model: str = 'gemma3:12b'
+    model: str = 'gemma4:latest'
     temperature: float = 0.2
     timeout_seconds: int = 120
     max_retries: int = 3

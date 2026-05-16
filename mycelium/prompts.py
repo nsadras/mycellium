@@ -1,7 +1,24 @@
 def encoding_prompt(index_content: str, transcript: str) -> tuple[str, str]:
-    system = """You are a memory encoder for an AI agent. Given a session transcript, extract the most significant events, decisions, beliefs, or facts worth remembering. For each, rate importance 0.0–1.0 and assign topic tags. Format as structured log entries.
+    system = """You are a memory encoder for an AI agent. Given a session transcript, extract everything the agent learned that may be useful later.
 
-Filter out: small talk, routine confirmations, anything already well covered in the wiki (which is provided below for reference).
+Encode durable learned memory, not every utterance. Always preserve:
+- user identity, background, expertise, constraints, preferences, goals, and long-running plans
+- project facts, implementation decisions, architecture choices, bugs, and open questions
+- commitments, task state, unresolved follow-ups, and facts supplied by the user
+- stable concepts or abstractions learned from the interaction
+
+Be conservative with assistant-generated generic explanations. Do not encode textbook material unless it became a user-specific plan, project decision, or durable abstraction.
+
+Filter out only: small talk, routine confirmations, duplicated information already well covered in the wiki, and ephemeral turns with no future relevance.
+
+For each entry:
+- "content": one concise standalone memory fact, written so a future agent can use it without the transcript
+- "memory_type": one of "user_profile", "preference", "goal", "project_fact", "concept", "decision", "open_question", "task_state", "other"
+- "durability": one of "ephemeral", "session", "durable"
+- "importance": 0.0–1.0, used for ranking/decay, not as the only write/no-write decision
+- "tags": topic tags
+
+Return a JSON list of objects. Prefer returning durable entries for anything genuinely learned. Return an empty list only if the transcript contains no learned memory beyond small talk or duplication.
 
 Respond with valid JSON only. No markdown code fences, no explanation, no preamble."""
     user = f"""WIKI INDEX:
@@ -35,6 +52,9 @@ Rules:
 - Update related: links if new connections are apparent.
 - Increment version.
 - Do NOT include specific dates, people's names, or episodic details unless they are themselves the principle being recorded.
+- Make wiki pages compatible with Obsidian: when referencing another wiki page in markdown content, use double-bracket links like [[project-architecture]].
+- Use the page slug inside double brackets, not the title, unless the slug and title are identical.
+- If a related edge points to another page, include a natural inline reference to that page with [[target-slug]] where it helps the page read coherently.
 
 Return the updated page content in JSON format with fields:
 - "title": string
@@ -55,6 +75,7 @@ NEW LOG ENTRIES:
 def consolidation_index_prompt(current_index: str, changes_summary: str) -> tuple[str, str]:
     system = """You are updating the wiki index based on recent consolidation changes.
 Update the index to reflect new pages, updated descriptions, and new cross-links. Keep it concise.
+Make the index compatible with Obsidian by linking pages with [[page-slug]] syntax. Use wiki-style links for page entries and cross-links; do not use markdown file links like [page](page.md).
 
 Return the completely rewritten index markdown as a string inside a JSON object with a single "index" field.
 
@@ -96,6 +117,9 @@ Rules:
 - Maintain the page's abstracted, principle-level voice
 - Determine a reason for the update to put in the update_log
 - Return the new confidence score
+- Make wiki pages compatible with Obsidian: when referencing another wiki page in markdown content, use double-bracket links like [[project-architecture]].
+- Use the page slug inside double brackets, not the title, unless the slug and title are identical.
+- If a related edge points to another page, include a natural inline reference to that page with [[target-slug]] where it helps the page read coherently.
 
 Return the updated page content in JSON format with fields:
 - "title": string
@@ -120,7 +144,7 @@ def routing_prompt(index_content: str, query: str, budget_tokens: int) -> tuple[
 Constraints:
 - Total loaded content must stay under {budget_tokens} tokens
 - Prefer pages with higher confidence and lower decay_score
-- Follow related: links to include associated pages if budget allows
+- Follow related links and Obsidian-style [[page-slug]] links to include associated pages if budget allows
 - If no pages are clearly relevant, return an empty list
 
 Return JSON: a list of objects, each with:

@@ -30,7 +30,14 @@ class DreamProcess:
         if not entries and strategy != 'association_only':
             return DreamReport(0, 0, 0, [], 0, None)
             
-        entries_str = "\n".join([f"[{e.entry_id}] {e.content}" for e in entries])
+        entries_str = "\n".join([
+            (
+                f"[{e.entry_id}] "
+                f"type={e.memory_type}; durability={e.durability}; importance={e.importance:.2f}; "
+                f"tags={', '.join(e.tags)}\n{e.content}"
+            )
+            for e in entries
+        ])
         index_content = self.wiki.get_index()
         
         system, user = prompts.consolidation_identify_prompt(index_content, entries_str)

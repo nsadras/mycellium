@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+import mycelium
+
+SESSIONS_FILE = Path("mnemos_store/sessions_meta.json")
+DEFAULT_IDLE_MINUTES = 20
+DEFAULT_MAX_TURNS = 25
+
+_mem: mycelium.Mycelium | None = None
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso_now() -> str:
+    return utc_now().isoformat()
+
+
+def get_mem() -> mycelium.Mycelium:
+    global _mem
+    if _mem is None:
+        _mem = mycelium.Mycelium(store_path="./mnemos_store", config_path="mnemos.toml")
+        # The web app owns episode flushing, so don't dream after every message.
+        _mem.config.dream.schedule = "manual"
+    return _mem
+
+
+def load_meta() -> dict[str, Any]:
+    if not SESSIONS_FILE.exists():
+        return {}
+    with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_meta(meta: dict[str, Any]) -> None:
+    SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
+def ensure_session_record(record: dict[str, Any], session_id: str) -> dict[str, Any]:
+    record.setdefault("query", "New session")
+    record.setdefault("transcript", [])
+    record.setdefault("episode_seq", 1)
+    record.setdefault("encoded_episodes", [])
+    if "active_episode" not in record:
+        record["active_episode"] = {
+            "id": f"{session_id}-ep-1",
+            "started_at": iso_now(),
+            "last_activity_at": iso_now(),
+            "buffer": [],
+            "turn_count": 0,
+        }
+    return record
+
+
+def append_turn(meta: dict[str, Any], session_id: str, user_message: str, assistant_message: str) -> None:
+    record = ensure_session_record(meta[session_id], session_id)
+    now = iso_now()
+    record["transcript"].append({"role": "user", "content": user_message})
+    record["transcript"].append({"role": "assistant", "content": assistant_message})
+
+    episode = record["active_episode"]
+    episode["buffer"].append({"role": "user", "content": user_message})
+    episode["buffer"].append({"role": "assistant", "content": assistant_message})
+    episode["turn_count"] = int(episode.get("turn_count", 0)) + 1
+    episode["last_activity_at"] = now
+
+
+def recent_thread_context(record: dict[str, Any], limit: int = 8) -> str:
+    transcript = record.get("transcript", [])[-limit:]
+    return "\n".join(f"{m.get('role', '').upper()}: {m.get('content', '')}" for m in transcript)
+
+
+def episode_transcript(record: dict[str, Any]) -> str:
+    episode = record.get("active_episode", {})
+    return "\n".join(f"{m.get('role', '').upper()}: {m.get('content', '')}" for m in episode.get("buffer", []))
+
+
+def start_new_episode(record: dict[str, Any], session_id: str) -> dict[str, Any]:
+    record["episode_seq"] = int(record.get("episode_seq", 1)) + 1
+    episode_id = f"{session_id}-ep-{record['episode_seq']}"
+    record["active_episode"] = {
+        "id": episode_id,
+        "started_at": iso_now(),
+        "last_activity_at": iso_now(),
+        "buffer": [],
+        "turn_count": 0,
+    }
+    return record["active_episode"]
+
+
+async def flush_session_episode(session_id: str, reason: str = "manual") -> dict[str, Any]:
+    meta = load_meta()
+    if session_id not in meta:
+        return {"session_id": session_id, "status": "missing", "entries_encoded": 0, "resolved_pages": []}
+
+    record = ensure_session_record(meta[session_id], session_id)
+    episode = record["active_episode"]
+    transcript = episode_transcript(record)
+    if not transcript.strip():
+        save_meta(meta)
+        return {
+            "session_id": session_id,
+            "episode_id": episode["id"],
+            "status": "empty",
+            "entries_encoded": 0,
+            "resolved_pages": [],
+        }
+
+    mem = get_mem()
+    entries = await mem.encoder.encode_session(
+        transcript,
+        episode["id"],
+        mem.config.min_importance_to_encode,
+    )
+    resolved_pages = await mem.reconsolidation_engine.resolve_labile_pages(episode["id"])
+    record["encoded_episodes"].append(
+        {
+            "id": episode["id"],
+            "encoded_at": iso_now(),
+            "reason": reason,
+            "turn_count": episode.get("turn_count", 0),
+            "entries_encoded": len(entries),
+            "resolved_pages": resolved_pages,
+        }
+    )
+    start_new_episode(record, session_id)
+    save_meta(meta)
+    return {
+        "session_id": session_id,
+        "episode_id": episode["id"],
+        "status": "flushed",
+        "entries_encoded": len(entries),
+        "resolved_pages": resolved_pages,
+    }
+
+
+async def flush_idle_episodes(
+    idle_minutes: int = DEFAULT_IDLE_MINUTES,
+    max_turns: int = DEFAULT_MAX_TURNS,
+    force: bool = False,
+) -> dict[str, Any]:
+    meta = load_meta()
+    now = utc_now()
+    candidates: list[str] = []
+
+    for session_id, record in meta.items():
+        ensure_session_record(record, session_id)
+        episode = record["active_episode"]
+        if not episode.get("buffer"):
+            continue
+        last_activity = datetime.fromisoformat(episode["last_activity_at"])
+        if last_activity.tzinfo is None:
+            last_activity = last_activity.replace(tzinfo=timezone.utc)
+        is_idle = now - last_activity >= timedelta(minutes=idle_minutes)
+        is_large = int(episode.get("turn_count", 0)) >= max_turns
+        if force or is_idle or is_large:
+            candidates.append(session_id)
+
+    save_meta(meta)
+    results = [await flush_session_episode(session_id, "manual" if force else "policy") for session_id in candidates]
+    return {"flushed": len([r for r in results if r["status"] == "flushed"]), "results": results}
+
+
+async def resolve_session_reconsolidation(session_id: str) -> dict[str, Any]:
+    meta = load_meta()
+    if session_id not in meta:
+        return {"session_id": session_id, "status": "missing", "resolved_pages": []}
+    record = ensure_session_record(meta[session_id], session_id)
+    save_meta(meta)
+    episode_id = record["active_episode"]["id"]
+    resolved_pages = await get_mem().reconsolidation_engine.resolve_labile_pages(episode_id)
+    return {
+        "session_id": session_id,
+        "episode_id": episode_id,
+        "status": "resolved",
+        "resolved_pages": resolved_pages,
+    }
+
+
+async def run_dream() -> dict[str, Any]:
+    report = await get_mem().dream()
+    return {
+        "pages_updated": report.pages_updated,
+        "pages_created": report.pages_created,
+        "entries_consolidated": report.entries_consolidated,
+        "conflicts_found": report.conflicts_found,
+        "conflicts_resolved": report.conflicts_resolved,
+        "git_commit_sha": report.git_commit_sha,
+    }
+
+
+async def run_decay() -> dict[str, Any]:
+    changed_scores = await get_mem().dream_process.decay_engine.run_pass()
+    return {"pages_changed": len(changed_scores), "changed_scores": changed_scores}
