@@ -52,12 +52,7 @@ class LogEntry:
     timestamp: datetime
     content: str
     importance: float
-    tags: list[str]
     status: Literal['raw', 'consolidated', 'archived']
-    memory_type: Literal[
-        'user_profile', 'preference', 'goal', 'project_fact',
-        'concept', 'decision', 'open_question', 'task_state', 'other'
-    ] = 'other'
     durability: Literal['ephemeral', 'session', 'durable'] = 'durable'
     consolidated: bool = False
     decay_score: float = 1.0

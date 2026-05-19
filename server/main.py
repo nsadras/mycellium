@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from server.api import sessions, memory
 from server.runtime import flush_idle_episodes, get_mem, run_decay, run_dream
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Mycelium API")
 scheduler = AsyncIOScheduler()

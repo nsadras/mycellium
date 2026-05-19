@@ -1,4 +1,4 @@
-import { Archive, Book, BrainCircuit, FileText, Loader2, MessageSquare, Moon, RefreshCw, Save, Sparkles } from 'lucide-react';
+import { Archive, Book, BrainCircuit, FileText, Loader2, MessageSquare, Moon, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -11,7 +11,7 @@ interface SidebarProps {
   setActiveTab: (tab: 'chat' | 'wiki' | 'logs') => void;
   onDream: () => void;
   onMemoryOperation: (
-    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay'
+    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory'
   ) => void;
   hasSelectedSession: boolean;
   runningMemoryOperation: string | null;
@@ -67,6 +67,13 @@ export default function Sidebar({
       needsSession: false,
       tooltip: 'Recompute decay scores and archive weak memories.',
     },
+    {
+      id: 'clear-memory',
+      label: 'Clear Memory',
+      icon: Trash2,
+      needsSession: false,
+      tooltip: 'Delete all wiki pages and episodic logs for development.',
+    },
   ] as const;
 
   return (
@@ -115,7 +122,9 @@ export default function Sidebar({
                 "w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold transition-colors",
                 disabled
                   ? "text-slate-600 cursor-not-allowed"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  : op.id === 'clear-memory'
+                    ? "text-rose-300 hover:bg-rose-950/50 hover:text-rose-100"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
               )}
             >
               {isRunning ? <Loader2 size={15} className="animate-spin" /> : <Icon size={15} />}

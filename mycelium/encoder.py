@@ -7,16 +7,25 @@ from mycelium.store import WikiStore, LogStore
 from mycelium.ollama import OllamaClient
 from mycelium.config import Config
 from mycelium import prompts
+from mycelium.structured_outputs import EncodedSessionOutput, ImportanceRatingOutput
 
-ALWAYS_ENCODE_TYPES = {
-    "user_profile",
-    "preference",
-    "goal",
-    "project_fact",
-    "decision",
-    "open_question",
-    "task_state",
+IMPORTANCE_LABELS = {
+    "low": 0.25,
+    "medium": 0.6,
+    "high": 0.9,
 }
+
+
+def normalize_importance(value, default: float = 0.5) -> float:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in IMPORTANCE_LABELS:
+            return IMPORTANCE_LABELS[normalized]
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 
 class Encoder:
     def __init__(self, llm: OllamaClient, wiki_store: WikiStore, log_store: LogStore, config: Config):
@@ -29,43 +38,16 @@ class Encoder:
         self,
         transcript: str,
         session_id: str,
-        min_importance: float = 0.3,
     ) -> List[LogEntry]:
         
         index_content = self.wiki_store.get_index()
         system, user = prompts.encoding_prompt(index_content, transcript)
         
-        # We expect a JSON list of entries from the LLM
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "content": {"type": "string"},
-                    "memory_type": {
-                        "type": "string",
-                        "enum": [
-                            "user_profile", "preference", "goal", "project_fact",
-                            "concept", "decision", "open_question", "task_state", "other"
-                        ]
-                    },
-                    "durability": {
-                        "type": "string",
-                        "enum": ["ephemeral", "session", "durable"]
-                    },
-                    "importance": {"type": "number"},
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    }
-                },
-                "required": ["content", "memory_type", "durability", "importance", "tags"]
-            }
-        }
-        
-        response = await self.llm.call_structured(system, user, schema)
-        if not isinstance(response, list):
-            response = [response] if isinstance(response, dict) else []
+        response = await self.llm.call_structured(system, user, EncodedSessionOutput)
+        if isinstance(response, dict):
+            response = response.get("entries", [])
+        elif not isinstance(response, list):
+            response = []
             
         created_entries = []
         now = datetime.datetime.now()
@@ -75,22 +57,11 @@ class Encoder:
             if not isinstance(item, dict):
                 continue
                 
-            importance = float(item.get("importance", 0.0))
-            memory_type = str(item.get("memory_type", "other"))
+            importance = normalize_importance(item.get("importance"), default=0.0)
             durability = str(item.get("durability", "durable"))
             content = item.get("content", "").strip()
             if not content:
                 continue
-
-            should_encode = (
-                durability == "durable"
-                or memory_type in ALWAYS_ENCODE_TYPES
-                or importance >= min_importance
-            )
-            if not should_encode:
-                continue
-                
-            tags = item.get("tags", [])
             
             # Generate a unique entry ID
             short_id = str(uuid.uuid4())[:8]
@@ -102,9 +73,7 @@ class Encoder:
                 timestamp=now,
                 content=content,
                 importance=importance,
-                tags=tags,
                 status="raw",
-                memory_type=memory_type,  # type: ignore[arg-type]
                 durability=durability,  # type: ignore[arg-type]
                 consolidated=False,
                 decay_score=1.0
@@ -120,33 +89,17 @@ class Encoder:
         content: str,
         session_id: str,
         importance: Optional[float] = None,
-        tags: Optional[List[str]] = None,
-        memory_type: str = "other",
         durability: str = "durable",
     ) -> LogEntry:
         
         final_importance = importance
-        final_tags = tags or []
         
         if importance is None:
             system, user = prompts.importance_rating_prompt(content)
-            schema = {
-                "type": "object",
-                "properties": {
-                    "importance": {"type": "number"},
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    }
-                },
-                "required": ["importance", "tags"]
-            }
-            response = await self.llm.call_structured(system, user, schema)
+            response = await self.llm.call_structured(system, user, ImportanceRatingOutput)
             
             if isinstance(response, dict):
                 final_importance = float(response.get("importance", 0.5))
-                if tags is None:
-                    final_tags = response.get("tags", [])
             else:
                 final_importance = 0.5
                 
@@ -164,9 +117,7 @@ class Encoder:
             timestamp=now,
             content=content,
             importance=final_importance,
-            tags=final_tags,
             status="raw",
-            memory_type=memory_type,  # type: ignore[arg-type]
             durability=durability,  # type: ignore[arg-type]
             consolidated=False,
             decay_score=1.0

@@ -202,9 +202,7 @@ class LogStore:
             f.write(f"## {entry_name} — {entry.timestamp.strftime('%H:%M')}\n\n")
             f.write(f"**session_id:** {entry.session_id}  \n")
             f.write(f"**importance:** {entry.importance}  \n")
-            f.write(f"**memory_type:** {entry.memory_type}  \n")
             f.write(f"**durability:** {entry.durability}  \n")
-            f.write(f"**tags:** {', '.join(entry.tags)}  \n")
             f.write(f"**status:** {entry.status}  \n")
             f.write(f"**consolidated:** {str(entry.consolidated).lower()}  \n")
             if entry.decay_score != 1.0:
@@ -266,16 +264,8 @@ class LogStore:
                         timestamp = datetime.now()
                         
                     importance = float(metadata.get("importance", "0.0"))
-                    tags = [t.strip() for t in metadata.get("tags", "").split(",") if t.strip()]
                     status = typing.cast(Literal['raw', 'consolidated', 'archived'], metadata.get("status", "raw"))
                     decay_score = float(metadata.get("decay_score", "1.0"))
-                    memory_type = typing.cast(
-                        Literal[
-                            'user_profile', 'preference', 'goal', 'project_fact',
-                            'concept', 'decision', 'open_question', 'task_state', 'other'
-                        ],
-                        metadata.get("memory_type", "other"),
-                    )
                     durability = typing.cast(
                         Literal['ephemeral', 'session', 'durable'],
                         metadata.get("durability", "durable"),
@@ -287,9 +277,7 @@ class LogStore:
                         timestamp=timestamp,
                         content="\n".join(body_lines).strip(),
                         importance=importance,
-                        tags=tags,
                         status=status,
-                        memory_type=memory_type,
                         durability=durability,
                         consolidated=is_consolidated,
                         decay_score=decay_score

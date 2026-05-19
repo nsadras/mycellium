@@ -10,6 +10,7 @@ from mycelium.encoder import Encoder
 from mycelium.budget import ContextBudget
 from mycelium.session import Session
 from mycelium import prompts
+from mycelium.structured_outputs import RoutingOutput
 
 class Mycelium:
     def __init__(
@@ -93,20 +94,7 @@ class Mycelium:
             return []
             
         system, user = prompts.routing_prompt(index_content, query, budget.remaining())
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "page": {"type": "string"},
-                    "reason": {"type": "string"},
-                    "priority": {"type": "integer"}
-                },
-                "required": ["page", "priority"]
-            }
-        }
-        
-        response = await self.llm.call_structured(system, user, schema)
+        response = await self.llm.call_structured(system, user, RoutingOutput)
         if not isinstance(response, list):
             response = [response] if isinstance(response, dict) else []
             
@@ -157,7 +145,7 @@ class Mycelium:
         finally:
             if sess.transcript:
                 transcript_str = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in sess.transcript])
-                await self.encoder.encode_session(transcript_str, session_id, self.config.min_importance_to_encode)
+                await self.encoder.encode_session(transcript_str, session_id)
             
             await self.reconsolidation_engine.resolve_labile_pages(session_id)
             

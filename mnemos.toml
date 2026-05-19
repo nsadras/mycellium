@@ -9,4 +9,3 @@ temperature = 0.2
 
 [session]
 context_budget_tokens = 8192
-min_importance_to_encode = 0.3

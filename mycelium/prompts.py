@@ -1,35 +1,55 @@
 def encoding_prompt(index_content: str, transcript: str) -> tuple[str, str]:
-    system = """You are a memory encoder for an AI agent. Given a session transcript, extract everything the agent learned that may be useful later.
+    system = """You are a memory encoder for an AI agent. You encode raw chat transcripts into an episodic memory format.
+"""
+    user = f"""
 
-Encode durable learned memory, not every utterance. Always preserve:
-- user identity, background, expertise, constraints, preferences, goals, and long-running plans
-- project facts, implementation decisions, architecture choices, bugs, and open questions
-- commitments, task state, unresolved follow-ups, and facts supplied by the user
-- stable concepts or abstractions learned from the interaction
+The following is a transcript of a conversation that the agent had with the user:
+-- TRANSCRIPT --
 
-Be conservative with assistant-generated generic explanations. Do not encode textbook material unless it became a user-specific plan, project decision, or durable abstraction.
+{transcript}
 
-Filter out only: small talk, routine confirmations, duplicated information already well covered in the wiki, and ephemeral turns with no future relevance.
+---END OF TRANSCRIPT--
 
-For each entry:
-- "content": one concise standalone memory fact, written so a future agent can use it without the transcript
-- "memory_type": one of "user_profile", "preference", "goal", "project_fact", "concept", "decision", "open_question", "task_state", "other"
-- "durability": one of "ephemeral", "session", "durable"
-- "importance": 0.0–1.0, used for ranking/decay, not as the only write/no-write decision
-- "tags": topic tags
+INSTRUCTIONS:
+Extract information from the transcript that may be relevant to future interactions with the user. Capture generously — a separate consolidation process will edit, abstract, and prune. Your job is to be a journalist, not an editor.
 
-Return a JSON list of objects. Prefer returning durable entries for anything genuinely learned. Return an empty list only if the transcript contains no learned memory beyond small talk or duplication.
+Treat user messages as the primary source of factual memory. Agent messages provide context for understanding what the user was responding to. Tool calls, tool results, file edits, test results, search results, and other system observations are also valid memory sources.
 
-Respond with valid JSON only. No markdown code fences, no explanation, no preamble."""
-    user = f"""WIKI INDEX:
-{index_content}
+Always capture:
+- User identity, background, expertise, constraints, preferences, goals, and long-running plans
+- Project facts, implementation decisions, architecture choices, bugs, and open questions
+- Commitments, task state, unresolved follow-ups, and facts supplied by the user
+- Stable concepts or abstractions that emerged from the interaction
+- Recommendations or plans you gave that were tailored to this user's specific context
+- How the user responded to agent suggestions — whether they accepted, pushed back, modified, or ignored them
+- Anything the agent would want to know to pick up this conversation coherently, without the full conversation transcript
 
-TRANSCRIPT:
-{transcript}"""
+For assistant-originated content:
+- Capture recommendations, plans, and explanations that were personalized to this user — but write them as interaction memory, not universal fact
+- Use phrasing like "Agent recommended..." or "A proposed plan for the user is..." rather than asserting advice as objective truth
+
+Examples:
+- Skip: "RLHF uses reward models and PPO." (generic knowledge, already in weights)
+- Keep (unconfirmed): "Agent proposed model-based RL and POMDPs as project directions given the user's computational neuroscience background. User has not yet confirmed this direction."
+- Keep (confirmed): "The user confirmed they will pursue a POMDP-based approach for their BCI project, building on the agent's recommendation."
+
+For each entry, output a json object with the following fields:
+- "content": one concise standalone memory fact written so a future agent can use it without the transcript. Always include what makes this specific to this user, not just the bare fact.
+- "durability": one of "ephemeral" (single session relevance only), "session" (relevant for days), "durable" (stable until explicitly updated)
+- "importance": "low", "medium", or "high"
+
+Return a JSON object with a single "entries" field containing a list of these objects. Respond with valid JSON only. No markdown code fences, no explanation, no preamble.
+"""
     return system, user
 
 def consolidation_identify_prompt(index_content: str, log_entries: str) -> tuple[str, str]:
     system = """You are a memory consolidation agent. Given recent log entries, identify which existing wiki pages are affected by new information, and whether any new pages need to be created.
+
+Group related log entries into the smallest useful set of semantic pages. Do not create one page per log entry.
+Prefer updating an existing page from the wiki index when the new information fits its topic, even if the fit is approximate.
+Create a new page only when no existing page can reasonably absorb the information.
+Use stable lowercase slug names with hyphens, for example "user-profile" or "reinforcement-learning". Do not return placeholder names like "Page 1", "Topic A", or "New Page".
+If multiple log entries concern the same theme, return one page target for that theme.
 
 Return a JSON list of objects, each with:
 - "page": the slug of the wiki page
@@ -47,6 +67,7 @@ def consolidation_rewrite_prompt(existing_page: str, log_entries: str) -> tuple[
     system = """You are rewriting a wiki page to incorporate new experience.
 Rules:
 - Abstract, do not summarize. Extract the principle, not the event.
+- Keep the page focused on one coherent semantic topic. Do not produce the same broad page title for unrelated slugs.
 - Resolve conflicts explicitly: if new info contradicts existing content, choose the more recent/credible version and note the revision.
 - Update confidence score based on how much evidence now supports this.
 - Update related: links if new connections are apparent.
@@ -76,6 +97,7 @@ def consolidation_index_prompt(current_index: str, changes_summary: str) -> tupl
     system = """You are updating the wiki index based on recent consolidation changes.
 Update the index to reflect new pages, updated descriptions, and new cross-links. Keep it concise.
 Make the index compatible with Obsidian by linking pages with [[page-slug]] syntax. Use wiki-style links for page entries and cross-links; do not use markdown file links like [page](page.md).
+Use only real page slugs from the current index or changes. Never invent placeholder links such as [[Page 1]], [[Topic A]], [[New Page]], [[Getting Started]], or [[Glossary]] unless those are actual page slugs.
 
 Return the completely rewritten index markdown as a string inside a JSON object with a single "index" field.
 
@@ -161,11 +183,10 @@ USER QUERY:
     return system, user
 
 def importance_rating_prompt(content: str) -> tuple[str, str]:
-    system = """You are a memory importance rater. Given a piece of information, rate its long-term importance for an AI agent on a scale from 0.0 to 1.0. Also suggest topic tags.
+    system = """You are a memory importance rater. Given a piece of information, rate its long-term importance for an AI agent on a scale from 0.0 to 1.0.
 
 Return JSON with fields:
 - "importance": float
-- "tags": list of strings
 
 Respond with valid JSON only. No markdown code fences, no explanation, no preamble."""
     user = f"""CONTENT:

@@ -55,9 +55,15 @@ function App() {
   };
 
   const handleMemoryOperation = async (
-    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay'
+    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory'
   ) => {
     try {
+      if (operation === 'clear-memory') {
+        const confirmed = window.confirm(
+          'Delete all wiki pages and episodic logs? This is intended for development and cannot be undone.'
+        );
+        if (!confirmed) return;
+      }
       setRunningMemoryOperation(operation);
       let res;
       if (operation === 'flush-current') {
@@ -78,6 +84,8 @@ function App() {
         res = await api.post('/memory/reconsolidation/resolve', { session_id: selectedSessionId });
       } else if (operation === 'decay') {
         res = await api.post('/memory/decay');
+      } else if (operation === 'clear-memory') {
+        res = await api.post('/memory/dev/clear');
       } else {
         res = await api.post('/memory/dream');
       }

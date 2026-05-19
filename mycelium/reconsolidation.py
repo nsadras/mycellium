@@ -8,6 +8,7 @@ from mycelium.store import WikiStore
 from mycelium.ollama import OllamaClient
 from mycelium.config import Config
 from mycelium import prompts
+from mycelium.structured_outputs import PredictionErrorOutput, ReconsolidationRewriteOutput
 
 class ReconsolidationEngine:
     def __init__(self, llm: OllamaClient, wiki: WikiStore, config: Config):
@@ -19,18 +20,7 @@ class ReconsolidationEngine:
 
     async def check(self, page: WikiPage, context: str) -> PredictionError:
         system, user = prompts.prediction_error_prompt(page.content, context)
-        schema = {
-            "type": "object",
-            "properties": {
-                "conflict_type": {"type": "string", "enum": ["none", "additive", "partial", "major"]},
-                "discrepancy_score": {"type": "number"},
-                "explanation": {"type": "string"},
-                "suggested_update": {"type": ["string", "null"]}
-            },
-            "required": ["conflict_type", "discrepancy_score", "explanation"]
-        }
-        
-        response = await self.llm.call_structured(system, user, schema)
+        response = await self.llm.call_structured(system, user, PredictionErrorOutput)
         if not isinstance(response, dict):
             # Fallback
             return PredictionError(
@@ -76,20 +66,7 @@ class ReconsolidationEngine:
             } for s in signals], indent=2)
             
             system, user = prompts.reconsolidation_rewrite_prompt(original_page.content, signals_str)
-            schema = {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "content": {"type": "string"},
-                    "tags": {"type": "array", "items": {"type": "string"}},
-                    "confidence": {"type": "number"},
-                    "importance": {"type": "number"},
-                    "update_reason": {"type": "string"}
-                },
-                "required": ["title", "content", "confidence", "update_reason"]
-            }
-            
-            response = await self.llm.call_structured(system, user, schema)
+            response = await self.llm.call_structured(system, user, ReconsolidationRewriteOutput)
             
             if isinstance(response, dict):
                 # Apply updates

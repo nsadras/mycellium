@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
 class Message(BaseModel):
     role: str
     content: str
+    loaded_pages: Optional[List[dict]] = None
 
 class SessionInfo(BaseModel):
     id: str
@@ -107,7 +108,11 @@ async def chat(session_id: str, req: ChatRequest):
     )
     response_text = await mem.llm.call(system=system_prompt, user=req.message)
 
-    append_turn(meta, session_id, req.message, response_text)
+    loaded_page_meta = [
+        {"slug": p.slug, "title": p.title, "confidence": p.confidence, "version": p.version}
+        for p in loaded_pages
+    ]
+    append_turn(meta, session_id, req.message, response_text, loaded_page_meta)
     turn_count = int(meta[session_id]["active_episode"].get("turn_count", 0))
     save_meta(meta)
     auto_flush = None
@@ -116,7 +121,7 @@ async def chat(session_id: str, req: ChatRequest):
 
     return {
         "response": response_text,
-        "loaded_pages": [p.slug for p in loaded_pages],
+        "loaded_pages": loaded_page_meta,
         "episode_id": episode_id,
         "auto_flush": auto_flush,
     }

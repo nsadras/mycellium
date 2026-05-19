@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Literal, Optional
 import uuid
@@ -9,6 +10,26 @@ from mycelium.ollama import OllamaClient
 from mycelium.config import Config
 from mycelium import prompts
 from mycelium.decay import DecayEngine
+from mycelium.structured_outputs import (
+    ConsolidationIdentifyOutput,
+    WikiIndexOutput,
+    WikiMergeOutput,
+    WikiRewriteOutput,
+)
+
+
+def _normalize_page_key(value: str) -> str:
+    value = value.strip()
+    if value.startswith("[[") and value.endswith("]]"):
+        value = value[2:-2]
+    value = value.replace(".md", "")
+    value = value.lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return value.strip("-")
+
+
+def _slugify(value: str) -> str:
+    return _normalize_page_key(value) or "untitled"
 
 class DreamProcess:
     def __init__(self, llm: OllamaClient, wiki: WikiStore, logs: LogStore, config: Config):
@@ -33,40 +54,30 @@ class DreamProcess:
         entries_str = "\n".join([
             (
                 f"[{e.entry_id}] "
-                f"type={e.memory_type}; durability={e.durability}; importance={e.importance:.2f}; "
-                f"tags={', '.join(e.tags)}\n{e.content}"
+                f"durability={e.durability}; importance={e.importance:.2f}\n{e.content}"
             )
             for e in entries
         ])
+        source_entry_ids = [e.entry_id for e in entries]
         index_content = self.wiki.get_index()
         
         system, user = prompts.consolidation_identify_prompt(index_content, entries_str)
-        schema = {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "page": {"type": "string"},
-                    "action": {"type": "string", "enum": ["update", "create", "none"]}
-                },
-                "required": ["page", "action"]
-            }
-        }
-        
-        identification = await self.llm.call_structured(system, user, schema)
+        identification = await self.llm.call_structured(system, user, ConsolidationIdentifyOutput)
         if not isinstance(identification, list):
             identification = [identification] if isinstance(identification, dict) else []
+        identification = self._dedupe_identification(identification)
             
         pages_updated = 0
         pages_created = 0
         conflicts_found = []
         conflicts_resolved = 0
+        title_to_slug = self._existing_title_index()
         
         for item in identification:
             if not isinstance(item, dict):
                 continue
                 
-            page_slug = item.get("page")
+            page_slug = _slugify(str(item.get("page", "")))
             action = item.get("action")
             
             if not page_slug or action not in ("update", "create"):
@@ -80,21 +91,8 @@ class DreamProcess:
                 existing_page = None
                 system, user = prompts.consolidation_rewrite_prompt("", entries_str)
                 is_create = True
-                
-            schema_rewrite = {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "content": {"type": "string"},
-                    "tags": {"type": "array", "items": {"type": "string"}},
-                    "related": {"type": "array", "items": {"type": "object"}},
-                    "confidence": {"type": "number"},
-                    "importance": {"type": "number"}
-                },
-                "required": ["title", "content", "confidence", "importance"]
-            }
             
-            rewritten = await self.llm.call_structured(system, user, schema_rewrite)
+            rewritten = await self.llm.call_structured(system, user, WikiRewriteOutput)
             if not isinstance(rewritten, dict):
                 continue
                 
@@ -104,6 +102,7 @@ class DreamProcess:
             tags = rewritten.get("tags", [])
             confidence = float(rewritten.get("confidence", 0.5))
             importance = float(rewritten.get("importance", 0.5))
+            title_key = _normalize_page_key(title)
             
             raw_related = rewritten.get("related", [])
             related_edges = []
@@ -114,6 +113,34 @@ class DreamProcess:
             now = datetime.now()
             
             if is_create:
+                duplicate_slug = title_to_slug.get(title_key)
+                if duplicate_slug and duplicate_slug != page_slug and self.wiki.exists(duplicate_slug):
+                    existing_page = self.wiki.get(duplicate_slug)
+                    existing_page.title = title
+                    existing_page.content = content
+                    existing_page.tags = tags
+                    existing_page.related = related_edges
+                    existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, source_entry_ids)
+                    existing_page.version += 1
+                    existing_page.last_updated = now
+                    log = UpdateLogEntry(
+                        existing_page.version,
+                        now,
+                        "system",
+                        "dream",
+                        0.0,
+                        f"Dream consolidation deduplicated proposed page '{page_slug}' into '{duplicate_slug}'",
+                        existing_page.confidence,
+                        confidence,
+                    )
+                    existing_page.confidence = confidence
+                    existing_page.importance = importance
+                    existing_page.update_log.append(log)
+                    if not dry_run:
+                        self.wiki.save(existing_page)
+                    pages_updated += 1
+                    continue
+
                 new_page = WikiPage(
                     slug=page_slug,
                     title=title,
@@ -126,10 +153,12 @@ class DreamProcess:
                     importance=importance,
                     tags=tags,
                     related=related_edges,
+                    source_log_entries=source_entry_ids,
                     update_log=[UpdateLogEntry(1, now, "system", "dream", 0.0, "Initial creation", 0.0, confidence)]
                 )
                 if not dry_run:
                     self.wiki.save(new_page)
+                title_to_slug[title_key] = page_slug
                 pages_created += 1
             else:
                 # Handle conflict
@@ -139,6 +168,7 @@ class DreamProcess:
                     existing_page.content = content
                     existing_page.tags = tags
                     existing_page.related = related_edges
+                    existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, source_entry_ids)
                     existing_page.version += 1
                     existing_page.last_updated = now
                     
@@ -164,6 +194,7 @@ class DreamProcess:
                         importance=importance,
                         tags=tags,
                         related=related_edges + [Edge(page_slug, "contradicts", 1.0)],
+                        source_log_entries=source_entry_ids,
                         update_log=[UpdateLogEntry(1, now, "system", "dream", 1.0, "Forked during dream", 0.0, confidence)]
                     )
                     
@@ -185,14 +216,10 @@ class DreamProcess:
                     system = "You are a memory synthesis agent. Merge the following two versions of a wiki page into a single, cohesive, abstracted page."
                     user = f"VERSION 1:\n{existing_page.content}\n\nVERSION 2:\n{content}"
                     
-                    merge_schema = {
-                        "type": "object",
-                        "properties": {"content": {"type": "string"}},
-                        "required": ["content"]
-                    }
-                    merged = await self.llm.call_structured(system, user, merge_schema)
+                    merged = await self.llm.call_structured(system, user, WikiMergeOutput)
                     if isinstance(merged, dict):
                         existing_page.content = merged.get("content", existing_page.content)
+                        existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, source_entry_ids)
                         existing_page.version += 1
                         existing_page.last_updated = now
                         log = UpdateLogEntry(existing_page.version, now, "system", "dream", 0.0, "Merged during dream", existing_page.confidence, confidence)
@@ -206,12 +233,7 @@ class DreamProcess:
         if pages_updated > 0 or pages_created > 0:
             changes = f"Updated {pages_updated} pages, created {pages_created} pages."
             system, user = prompts.consolidation_index_prompt(index_content, changes)
-            schema_index = {
-                "type": "object",
-                "properties": {"index": {"type": "string"}},
-                "required": ["index"]
-            }
-            res_index = await self.llm.call_structured(system, user, schema_index)
+            res_index = await self.llm.call_structured(system, user, WikiIndexOutput)
             if isinstance(res_index, dict) and "index" in res_index and not dry_run:
                 self.wiki.save_index(res_index["index"])
 
@@ -244,3 +266,35 @@ class DreamProcess:
             conflicts_resolved=conflicts_resolved,
             git_commit_sha=commit_sha
         )
+
+    def _dedupe_identification(self, identification: list) -> list[dict]:
+        deduped: dict[str, dict] = {}
+        for item in identification:
+            if not isinstance(item, dict):
+                continue
+            page = item.get("page")
+            action = item.get("action")
+            if not page or action not in ("update", "create", "none"):
+                continue
+            slug = _slugify(str(page))
+            if not slug or action == "none":
+                continue
+            existing = deduped.get(slug)
+            if existing is None:
+                deduped[slug] = {"page": slug, "action": action}
+            elif existing["action"] == "create" and action == "update":
+                existing["action"] = "update"
+        return list(deduped.values())
+
+    def _existing_title_index(self) -> dict[str, str]:
+        title_to_slug = {}
+        for page in self.wiki.list_all():
+            title_to_slug.setdefault(_normalize_page_key(page.title), page.slug)
+        return title_to_slug
+
+    def _merge_sources(self, existing: list[str], new: list[str]) -> list[str]:
+        merged = list(existing)
+        for entry_id in new:
+            if entry_id not in merged:
+                merged.append(entry_id)
+        return merged

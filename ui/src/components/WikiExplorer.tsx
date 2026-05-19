@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Search, Tag, Clock, ShieldCheck, ChevronRight, Book, History as HistoryIcon } from 'lucide-react';
+import { Search, Tag, Clock, ShieldCheck, ChevronRight, Book, History as HistoryIcon, Pencil, Save, X } from 'lucide-react';
 import api, { type WikiPage } from '../lib/api';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -15,6 +15,13 @@ export default function WikiExplorer() {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [pageData, setPageData] = useState<WikiPage | null>(null);
   const [search, setSearch] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editTags, setEditTags] = useState('');
+  const [editConfidence, setEditConfidence] = useState('0.5');
+  const [editImportance, setEditImportance] = useState('0.5');
+  const [editContent, setEditContent] = useState('');
 
   useEffect(() => {
     fetchPages();
@@ -39,8 +46,41 @@ export default function WikiExplorer() {
     try {
       const res = await api.get(`/memory/wiki/${slug}`);
       setPageData(res.data);
+      setIsEditing(false);
     } catch (err) {
       console.error("Failed to fetch page", err);
+    }
+  };
+
+  const startEdit = () => {
+    if (!pageData) return;
+    setEditTitle(pageData.title);
+    setEditTags(pageData.tags.join(', '));
+    setEditConfidence(String(pageData.confidence ?? 0.5));
+    setEditImportance(String(pageData.importance ?? 0.5));
+    setEditContent(pageData.content || '');
+    setIsEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!pageData) return;
+    setIsSaving(true);
+    try {
+      const res = await api.put(`/memory/wiki/${pageData.slug}`, {
+        title: editTitle,
+        content: editContent,
+        tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
+        confidence: Number(editConfidence),
+        importance: Number(editImportance),
+      });
+      setPageData(res.data);
+      setPages(prev => prev.map(p => p.slug === res.data.slug ? { ...p, title: res.data.title, confidence: res.data.confidence, tags: res.data.tags } : p));
+      setIsEditing(false);
+    } catch (err) {
+      console.error("Failed to save wiki page", err);
+      alert("Failed to save wiki page.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -100,14 +140,85 @@ export default function WikiExplorer() {
         {pageData ? (
           <div className="max-w-4xl mx-auto p-12">
             <header className="mb-12">
-              <div className="flex items-center gap-2 mb-4 text-xs font-bold text-indigo-600 uppercase tracking-widest">
-                <Book size={14} /> Wiki Page
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div className="flex items-center gap-2 text-xs font-bold text-indigo-600 uppercase tracking-widest">
+                  <Book size={14} /> Wiki Page
+                </div>
+                {isEditing ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      disabled={isSaving}
+                      className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                    >
+                      <X size={14} /> Cancel
+                    </button>
+                    <button
+                      onClick={saveEdit}
+                      disabled={isSaving}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      <Save size={14} /> {isSaving ? 'Saving' : 'Save'}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={startEdit}
+                    className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  >
+                    <Pencil size={14} /> Edit
+                  </button>
+                )}
               </div>
-              <h1 className="text-4xl font-extrabold text-slate-900 mb-6 tracking-tight leading-tight">
-                {pageData.title}
-              </h1>
+              {isEditing ? (
+                <div className="space-y-4">
+                  <input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-3xl font-extrabold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Tags
+                      <input
+                        value={editTags}
+                        onChange={(e) => setEditTags(e.target.value)}
+                        className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </label>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Confidence
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={editConfidence}
+                        onChange={(e) => setEditConfidence(e.target.value)}
+                        className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </label>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Importance
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={editImportance}
+                        onChange={(e) => setEditImportance(e.target.value)}
+                        className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <h1 className="text-4xl font-extrabold text-slate-900 mb-6 tracking-tight leading-tight">
+                  {pageData.title}
+                </h1>
+              )}
               
-              <div className="flex flex-wrap gap-4 items-center text-sm text-slate-500">
+              {!isEditing && <div className="flex flex-wrap gap-4 items-center text-sm text-slate-500">
                 <div className="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-full">
                   <ShieldCheck size={16} className="text-indigo-500" />
                   <span className="font-medium">v{pageData.version}</span>
@@ -123,14 +234,36 @@ export default function WikiExplorer() {
                     </span>
                   ))}
                 </div>
-              </div>
+              </div>}
             </header>
 
-            <div className="prose prose-slate prose-indigo max-w-none mb-16">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{pageData.content || ''}</ReactMarkdown>
-            </div>
+            {isEditing ? (
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="mb-10 min-h-[520px] w-full resize-y rounded-lg border border-slate-200 p-4 font-mono text-sm leading-relaxed text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            ) : (
+              <>
+                <div className="prose prose-slate prose-indigo max-w-none mb-10">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{pageData.content || ''}</ReactMarkdown>
+                </div>
+                {pageData.source_log_entries && pageData.source_log_entries.length > 0 && (
+                  <section className="mb-16 border-t border-slate-100 pt-8">
+                    <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-500">Sources</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {pageData.source_log_entries.map(entryId => (
+                        <span key={entryId} className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600">
+                          {entryId}
+                        </span>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
 
-            {pageData.update_log && pageData.update_log.length > 0 && (
+            {!isEditing && pageData.update_log && pageData.update_log.length > 0 && (
               <section className="border-t border-slate-100 pt-12">
                 <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
                   <HistoryIcon size={18} className="text-slate-400" /> Update Log

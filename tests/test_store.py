@@ -92,9 +92,7 @@ def test_log_store_append_and_get(tmp_path):
         timestamp=datetime(2026, 5, 10, 10, 0, 0),
         content="User said hello.",
         importance=0.5,
-        tags=["test"],
         status="raw",
-        memory_type="user_profile",
         durability="durable",
         consolidated=False,
         decay_score=1.0
@@ -106,7 +104,6 @@ def test_log_store_append_and_get(tmp_path):
     assert len(unconsolidated) == 1
     assert unconsolidated[0].content == "User said hello."
     assert unconsolidated[0].session_id == "ses-123"
-    assert unconsolidated[0].memory_type == "user_profile"
     assert unconsolidated[0].durability == "durable"
     assert not unconsolidated[0].consolidated
 
@@ -119,7 +116,6 @@ def test_log_store_mark_consolidated(tmp_path):
         timestamp=datetime(2026, 5, 10, 10, 0, 0),
         content="User said hello.",
         importance=0.5,
-        tags=["test"],
         status="raw",
         consolidated=False,
         decay_score=1.0
@@ -140,7 +136,6 @@ def test_log_store_update_decay(tmp_path):
         timestamp=datetime(2026, 5, 10, 10, 0, 0),
         content="User said hello.",
         importance=0.5,
-        tags=["test"],
         status="raw",
         consolidated=False,
         decay_score=1.0

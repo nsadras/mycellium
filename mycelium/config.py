@@ -14,7 +14,7 @@ class LLMConfig:
     provider: str = 'ollama'
     url: str = 'http://localhost:11434'
     model: str = 'gemma4:latest'
-    temperature: float = 0.2
+    temperature: float = 0.1
     timeout_seconds: int = 120
     max_retries: int = 3
 
@@ -47,7 +47,6 @@ class Config:
     store_path: Path = Path('./mnemos_store')
     git_commits: bool = False
     context_budget_tokens: int = 8192
-    min_importance_to_encode: float = 0.3
     llm: Optional[LLMConfig] = None
     reconsolidation: Optional[ReconsolidationConfig] = None
     dream: Optional[DreamConfig] = None
@@ -75,7 +74,6 @@ class Config:
         store_path = Path(data.get('store', {}).get('path', './mnemos_store'))
         git_commits = data.get('store', {}).get('git_commits', False)
         context_budget_tokens = data.get('session', {}).get('context_budget_tokens', 8192)
-        min_importance_to_encode = data.get('session', {}).get('min_importance_to_encode', 0.3)
         
         llm_data = data.get('llm', {})
         llm = LLMConfig(
@@ -116,7 +114,6 @@ class Config:
             store_path=store_path,
             git_commits=git_commits,
             context_budget_tokens=context_budget_tokens,
-            min_importance_to_encode=min_importance_to_encode,
             llm=llm,
             reconsolidation=reconsolidation,
             dream=dream,

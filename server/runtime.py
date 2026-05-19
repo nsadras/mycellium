@@ -60,15 +60,24 @@ def ensure_session_record(record: dict[str, Any], session_id: str) -> dict[str, 
     return record
 
 
-def append_turn(meta: dict[str, Any], session_id: str, user_message: str, assistant_message: str) -> None:
+def append_turn(
+    meta: dict[str, Any],
+    session_id: str,
+    user_message: str,
+    assistant_message: str,
+    loaded_pages: list[dict[str, Any]] | None = None,
+) -> None:
     record = ensure_session_record(meta[session_id], session_id)
     now = iso_now()
     record["transcript"].append({"role": "user", "content": user_message})
-    record["transcript"].append({"role": "assistant", "content": assistant_message})
+    assistant_record = {"role": "assistant", "content": assistant_message}
+    if loaded_pages is not None:
+        assistant_record["loaded_pages"] = loaded_pages
+    record["transcript"].append(assistant_record)
 
     episode = record["active_episode"]
     episode["buffer"].append({"role": "user", "content": user_message})
-    episode["buffer"].append({"role": "assistant", "content": assistant_message})
+    episode["buffer"].append(assistant_record)
     episode["turn_count"] = int(episode.get("turn_count", 0)) + 1
     episode["last_activity_at"] = now
 
@@ -104,6 +113,8 @@ async def flush_session_episode(session_id: str, reason: str = "manual") -> dict
     record = ensure_session_record(meta[session_id], session_id)
     episode = record["active_episode"]
     transcript = episode_transcript(record)
+    turn_count = int(episode.get("turn_count", 0))
+    transcript_chars = len(transcript)
     if not transcript.strip():
         save_meta(meta)
         return {
@@ -111,22 +122,48 @@ async def flush_session_episode(session_id: str, reason: str = "manual") -> dict
             "episode_id": episode["id"],
             "status": "empty",
             "entries_encoded": 0,
+            "turn_count": turn_count,
+            "transcript_chars": transcript_chars,
             "resolved_pages": [],
         }
 
     mem = get_mem()
-    entries = await mem.encoder.encode_session(
-        transcript,
-        episode["id"],
-        mem.config.min_importance_to_encode,
-    )
+    try:
+        entries = await mem.encoder.encode_session(
+            transcript,
+            episode["id"],
+        )
+    except Exception as exc:
+        save_meta(meta)
+        return {
+            "session_id": session_id,
+            "episode_id": episode["id"],
+            "status": "encode_error",
+            "error": str(exc),
+            "entries_encoded": 0,
+            "turn_count": turn_count,
+            "transcript_chars": transcript_chars,
+            "resolved_pages": [],
+        }
+    if not entries:
+        save_meta(meta)
+        return {
+            "session_id": session_id,
+            "episode_id": episode["id"],
+            "status": "no_entries",
+            "entries_encoded": 0,
+            "turn_count": turn_count,
+            "transcript_chars": transcript_chars,
+            "resolved_pages": [],
+        }
+
     resolved_pages = await mem.reconsolidation_engine.resolve_labile_pages(episode["id"])
     record["encoded_episodes"].append(
         {
             "id": episode["id"],
             "encoded_at": iso_now(),
             "reason": reason,
-            "turn_count": episode.get("turn_count", 0),
+            "turn_count": turn_count,
             "entries_encoded": len(entries),
             "resolved_pages": resolved_pages,
         }
@@ -138,6 +175,8 @@ async def flush_session_episode(session_id: str, reason: str = "manual") -> dict
         "episode_id": episode["id"],
         "status": "flushed",
         "entries_encoded": len(entries),
+        "turn_count": turn_count,
+        "transcript_chars": transcript_chars,
         "resolved_pages": resolved_pages,
     }
 
@@ -200,3 +239,54 @@ async def run_dream() -> dict[str, Any]:
 async def run_decay() -> dict[str, Any]:
     changed_scores = await get_mem().dream_process.decay_engine.run_pass()
     return {"pages_changed": len(changed_scores), "changed_scores": changed_scores}
+
+
+def clear_memory_store() -> dict[str, int]:
+    mem = get_mem()
+    counts = {
+        "wiki_pages_deleted": 0,
+        "archived_pages_deleted": 0,
+        "logs_deleted": 0,
+        "labile_files_deleted": 0,
+        "sessions_reset": 0,
+    }
+
+    wiki_dir = mem.store_path / "wiki"
+    archive_dir = wiki_dir / "_archive"
+    logs_dir = mem.store_path / "logs"
+    labile_dir = mem.store_path / "labile"
+
+    for path in wiki_dir.glob("*.md"):
+        if path.name == "_index.md":
+            continue
+        path.unlink()
+        counts["wiki_pages_deleted"] += 1
+
+    for path in archive_dir.glob("*.md"):
+        path.unlink()
+        counts["archived_pages_deleted"] += 1
+
+    for path in logs_dir.glob("*.md"):
+        path.unlink()
+        counts["logs_deleted"] += 1
+
+    for path in labile_dir.glob("*.md"):
+        path.unlink()
+        counts["labile_files_deleted"] += 1
+
+    mem.wiki.save_index("# Wiki Index\n\n_last updated: never_\n\n## Pages\n")
+    meta = load_meta()
+    for session_id, record in meta.items():
+        ensure_session_record(record, session_id)
+        record["episode_seq"] = 1
+        record["encoded_episodes"] = []
+        record["active_episode"] = {
+            "id": f"{session_id}-ep-1",
+            "started_at": iso_now(),
+            "last_activity_at": iso_now(),
+            "buffer": record.get("transcript", []),
+            "turn_count": len([m for m in record.get("transcript", []) if m.get("role") == "user"]),
+        }
+        counts["sessions_reset"] += 1
+    save_meta(meta)
+    return counts

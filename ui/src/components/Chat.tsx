@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Pencil, Send, Plus, History, X } from 'lucide-react';
+import { BookOpen, Check, Pencil, Send, Plus, History, X } from 'lucide-react';
 import api, { type Session, type Message } from '../lib/api';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -60,7 +60,7 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
 
     try {
       const res = await api.post(`/sessions/${selectedId}/chat`, { message: input });
-      setMessages(prev => [...prev, { role: 'assistant', content: res.data.response }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: res.data.response, loaded_pages: res.data.loaded_pages }]);
     } catch (err) {
       console.error("Chat error", err);
       setMessages(prev => [...prev, { role: 'assistant', content: "Error: Failed to get response from agent." }]);
@@ -179,9 +179,25 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
                   {m.role === 'user' ? (
                     <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
                   ) : (
-                    <div className="prose prose-sm prose-slate max-w-none prose-chat">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                    </div>
+                    <>
+                      {m.loaded_pages && m.loaded_pages.length > 0 && (
+                        <div className="mb-3 flex flex-wrap gap-1.5 border-b border-slate-200 pb-2">
+                          {m.loaded_pages.map((page) => (
+                            <span
+                              key={page.slug}
+                              title={`${page.slug} v${page.version}`}
+                              className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 ring-1 ring-indigo-100"
+                            >
+                              <BookOpen size={11} />
+                              {page.title}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="prose prose-sm prose-slate max-w-none prose-chat">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
