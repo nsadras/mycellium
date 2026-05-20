@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from dataclasses import asdict
 from typing import List, Optional
 import uuid
 
@@ -16,6 +17,17 @@ from server.runtime import (
 
 router = APIRouter()
 
+
+def chat_history_messages(record: dict, current_message: str) -> list[dict[str, str]]:
+    messages = []
+    for item in record.get("transcript", []):
+        role = item.get("role")
+        content = item.get("content", "")
+        if role in {"user", "assistant"} and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": current_message})
+    return messages
+
 class SessionCreate(BaseModel):
     query: Optional[str] = "New session"
 
@@ -29,6 +41,7 @@ class Message(BaseModel):
     role: str
     content: str
     loaded_pages: Optional[List[dict]] = None
+    tool_events: Optional[List[dict]] = None
 
 class SessionInfo(BaseModel):
     id: str
@@ -102,17 +115,19 @@ async def chat(session_id: str, req: ChatRequest):
     system_prompt = (
         "You are a helpful and intelligent AI assistant. "
         "You have access to a long-term memory wiki that contains information you've learned from previous interactions. "
-        "Use the following memory context and recent thread context to inform your response if relevant.\n\n"
-        f"MEMORY CONTEXT:\n{memory_context or 'No relevant long-term memory context was found.'}\n\n"
-        f"RECENT THREAD:\n{thread_context or '(no prior turns)'}"
+        "Use the following memory context and the conversation history to inform your response if relevant.\n\n"
+        f"MEMORY CONTEXT:\n{memory_context or 'No relevant long-term memory context was found.'}"
     )
-    response_text = await mem.llm.call(system=system_prompt, user=req.message)
+    messages = [{"role": "system", "content": system_prompt}] + chat_history_messages(record, req.message)
+    chat_response = await mem.llm.call_messages(messages)
+    response_text = chat_response.content
+    tool_events = [asdict(event) for event in chat_response.tool_events]
 
     loaded_page_meta = [
         {"slug": p.slug, "title": p.title, "confidence": p.confidence, "version": p.version}
         for p in loaded_pages
     ]
-    append_turn(meta, session_id, req.message, response_text, loaded_page_meta)
+    append_turn(meta, session_id, req.message, response_text, loaded_page_meta, tool_events)
     turn_count = int(meta[session_id]["active_episode"].get("turn_count", 0))
     save_meta(meta)
     auto_flush = None
@@ -122,6 +137,7 @@ async def chat(session_id: str, req: ChatRequest):
     return {
         "response": response_text,
         "loaded_pages": loaded_page_meta,
+        "tool_events": tool_events,
         "episode_id": episode_id,
         "auto_flush": auto_flush,
     }

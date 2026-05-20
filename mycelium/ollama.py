@@ -3,20 +3,40 @@ import logging
 import time
 import re
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, Union, Optional
 
-from ollama import AsyncClient, RequestError, ResponseError
+from dotenv import load_dotenv
+from ollama import AsyncClient, Client, RequestError, ResponseError, web_fetch, web_search
 from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class ToolEvent:
+    tool_name: str
+    arguments: dict[str, Any]
+    result: str
+    failed: bool = False
+    truncated: bool = False
+
+
+@dataclass
+class ChatResponse:
+    content: str
+    tool_events: list[ToolEvent] = field(default_factory=list)
+
+
 class OllamaClient:
     def __init__(self, url: str, model: str, temperature: float = 0.1, timeout: int = 120) -> None:
+        load_dotenv()
         self.url = url.rstrip('/')
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
         self.client = AsyncClient(host=self.url, timeout=self.timeout)
+        self.web_client = Client()
         self._call_log: list[dict] = []
 
     def _extract_json(self, content: str) -> Union[dict, list]:
@@ -129,6 +149,225 @@ class OllamaClient:
                 if attempt == max_retries - 1:
                     raise
 
+    async def call_messages(
+        self,
+        messages: list[dict[str, Any]],
+        max_retries: int = 3,
+        temperature: Optional[float] = None,
+        enable_tools: bool = True,
+        max_tool_rounds: int = 5,
+        tool_result_chars: int = 8000,
+    ) -> ChatResponse:
+        """
+        Makes a chat completion call using an explicit message history.
+        """
+        call_id = str(uuid.uuid4())[:8]
+        temp = temperature if temperature is not None else self.temperature
+        options = {"temperature": temp}
+        endpoint = f"{self.url}/api/chat"
+        working_messages = list(messages)
+        tool_events: list[ToolEvent] = []
+
+        for attempt in range(max_retries):
+            start_time = time.time()
+            self._log_request(
+                call_id=call_id,
+                attempt=attempt + 1,
+                max_retries=max_retries,
+                endpoint=endpoint,
+                model=self.model,
+                messages=working_messages,
+                output_format=None,
+                options=options,
+            )
+            try:
+                content = await self._chat_with_optional_tools(
+                    call_id=call_id,
+                    messages=working_messages,
+                    options=options,
+                    enable_tools=enable_tools,
+                    max_tool_rounds=max_tool_rounds,
+                    tool_result_chars=tool_result_chars,
+                    tool_events=tool_events,
+                )
+                latency_ms = int((time.time() - start_time) * 1000)
+                self._log_call(
+                    call_id,
+                    attempt + 1,
+                    self._first_message_content(working_messages, "system"),
+                    self._last_message_content(working_messages, "user"),
+                    content,
+                    latency_ms,
+                    True,
+                )
+                return ChatResponse(content=content, tool_events=tool_events)
+
+            except (RequestError, ResponseError) as e:
+                latency_ms = int((time.time() - start_time) * 1000)
+                self._log_call(
+                    call_id,
+                    attempt + 1,
+                    self._first_message_content(working_messages, "system"),
+                    self._last_message_content(working_messages, "user"),
+                    str(e),
+                    latency_ms,
+                    False,
+                )
+                if attempt == max_retries - 1:
+                    raise
+
+        raise ValueError("Failed to get chat response from Ollama")
+
+    async def _chat_with_optional_tools(
+        self,
+        call_id: str,
+        messages: list[dict[str, Any]],
+        options: dict[str, Any],
+        enable_tools: bool,
+        max_tool_rounds: int,
+        tool_result_chars: int,
+        tool_events: list[ToolEvent],
+    ) -> str:
+        tools = [web_search, web_fetch] if enable_tools else None
+        for round_idx in range(max_tool_rounds + 1):
+            response = await self.client.chat(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                think=True if enable_tools else None,
+                stream=False,
+                format=None,
+                options=options,
+            )
+            assistant_message = self._assistant_message_dict(response)
+            content = assistant_message.get("content", "").strip()
+            tool_calls = assistant_message.get("tool_calls", [])
+            if content:
+                logger.info("LLM assistant content during tool loop\n%s", content)
+            messages.append(assistant_message)
+            if not tool_calls:
+                return content
+            if round_idx >= max_tool_rounds:
+                return content
+            for tool_call in tool_calls:
+                tool_name, tool_args = self._tool_call_name_args(tool_call)
+                result = self._run_tool(tool_name, tool_args)
+                truncated = result[:tool_result_chars]
+                failed = result.startswith(f"Tool {tool_name} failed:") or result == f"Tool {tool_name} not found"
+                tool_events.append(
+                    ToolEvent(
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                        result=truncated,
+                        failed=failed,
+                        truncated=len(result) > len(truncated),
+                    )
+                )
+                logger.info(
+                    "LLM tool call\n%s",
+                    json.dumps(
+                        {
+                            "call_id": call_id,
+                            "tool_name": tool_name,
+                            "arguments": tool_args,
+                            "result": truncated,
+                            "truncated": len(result) > len(truncated),
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                )
+                messages.append({"role": "tool", "content": truncated, "tool_name": tool_name})
+        return ""
+
+    def _assistant_message_dict(self, response: Any) -> dict[str, Any]:
+        message = getattr(response, "message", None)
+        if isinstance(message, dict):
+            return dict(message)
+        if message is None:
+            return {"role": "assistant", "content": ""}
+
+        assistant_message: dict[str, Any] = {
+            "role": getattr(message, "role", "assistant") or "assistant",
+            "content": getattr(message, "content", "") or "",
+        }
+        thinking = getattr(message, "thinking", None)
+        if thinking:
+            assistant_message["thinking"] = thinking
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            assistant_message["tool_calls"] = tool_calls
+        return assistant_message
+
+    def _tool_call_name_args(self, tool_call: Any) -> tuple[str, dict[str, Any]]:
+        function = tool_call.get("function") if isinstance(tool_call, dict) else getattr(tool_call, "function", None)
+        if isinstance(function, dict):
+            return str(function.get("name", "")), dict(function.get("arguments", {}) or {})
+        if function is None:
+            return "", {}
+        return str(getattr(function, "name", "")), dict(getattr(function, "arguments", {}) or {})
+
+    def _run_tool(self, tool_name: str, tool_args: dict[str, Any]) -> str:
+        try:
+            if tool_name == "web_search":
+                return self._format_web_search_result(self.web_client.web_search(**tool_args))
+            if tool_name == "web_fetch":
+                return self._format_web_fetch_result(self.web_client.web_fetch(**tool_args))
+            return f"Tool {tool_name} not found"
+        except Exception as exc:
+            return f"Tool {tool_name} failed: {exc}"
+
+    def _format_web_search_result(self, response: Any) -> str:
+        results = getattr(response, "results", None)
+        if results is None and isinstance(response, dict):
+            results = response.get("results")
+        if not results:
+            return "No search results."
+
+        formatted = []
+        for index, result in enumerate(results, start=1):
+            title = self._field(result, "title") or "Untitled result"
+            url = self._field(result, "url")
+            content = self._field(result, "content")
+            parts = [f"{index}. {title}"]
+            if url:
+                parts.append(str(url))
+            if content:
+                parts.append(str(content).replace("\\n", "\n"))
+            formatted.append("\n".join(parts))
+        return "\n\n---\n\n".join(formatted)
+
+    def _format_web_fetch_result(self, response: Any) -> str:
+        title = self._field(response, "title")
+        content = self._field(response, "content")
+        links = self._field(response, "links")
+        parts = []
+        if title:
+            parts.append(f"# {title}")
+        if content:
+            parts.append(str(content).replace("\\n", "\n"))
+        if links:
+            parts.append("Links:\n" + "\n".join(f"- {link}" for link in links))
+        return "\n\n".join(parts) if parts else "No fetched content."
+
+    def _field(self, value: Any, field: str) -> Any:
+        if isinstance(value, dict):
+            return value.get(field)
+        return getattr(value, field, None)
+
+    def _first_message_content(self, messages: list[dict[str, Any]], role: str) -> str:
+        for message in messages:
+            if message.get("role") == role:
+                return message.get("content", "")
+        return ""
+
+    def _last_message_content(self, messages: list[dict[str, Any]], role: str) -> str:
+        for message in reversed(messages):
+            if message.get("role") == role:
+                return message.get("content", "")
+        return ""
+
     def _response_content(self, response: Any) -> str:
         message = getattr(response, "message", None)
         if isinstance(message, dict):
@@ -240,7 +479,7 @@ class OllamaClient:
         max_retries: int,
         endpoint: str,
         model: str,
-        messages: list[dict[str, str]] | None,
+        messages: list[dict[str, Any]] | None,
         output_format: Union[str, dict[str, Any], None],
         options: dict[str, Any],
         prompt: str | None = None,
@@ -263,6 +502,7 @@ class OllamaClient:
                 },
                 indent=2,
                 ensure_ascii=False,
+                default=str,
             ),
         )
 

@@ -1,13 +1,67 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { BookOpen, Check, Pencil, Send, Plus, History, X } from 'lucide-react';
+import { BookOpen, Check, ChevronDown, ChevronRight, Globe, Pencil, Send, Plus, History, X } from 'lucide-react';
 import api, { type Session, type Message } from '../lib/api';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+function ToolEvents({ events }: { events: NonNullable<Message['tool_events']> }) {
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+
+  return (
+    <div className="mb-3 space-y-1.5 border-b border-slate-200 pb-2">
+      {events.map((event, index) => {
+        const isOpen = Boolean(open[index]);
+        return (
+          <div
+            key={`${event.tool_name}-${index}`}
+            className={cn(
+              "rounded-md border bg-white text-xs",
+              event.failed ? "border-rose-200" : "border-slate-200"
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setOpen(prev => ({ ...prev, [index]: !isOpen }))}
+              className="flex w-full items-center gap-2 px-2 py-1.5 text-left"
+              title="Show tool call details"
+            >
+              {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              <Globe size={13} className={event.failed ? "text-rose-500" : "text-indigo-500"} />
+              <span className="font-semibold text-slate-700">{event.tool_name}</span>
+              <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold", event.failed ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700")}>
+                {event.failed ? "failed" : "ok"}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="space-y-2 border-t border-slate-100 px-2 py-2">
+                <div>
+                  <div className="mb-1 font-semibold uppercase tracking-wide text-slate-400">Arguments</div>
+                  <pre className="max-h-40 overflow-auto rounded bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-700">
+                    {JSON.stringify(event.arguments, null, 2)}
+                  </pre>
+                </div>
+                <div>
+                  <div className="mb-1 flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-400">
+                    Result
+                    {event.truncated && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">truncated</span>}
+                  </div>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px] leading-relaxed text-slate-700">
+                    {event.result || "(empty result)"}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 interface ChatProps {
@@ -60,7 +114,12 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
 
     try {
       const res = await api.post(`/sessions/${selectedId}/chat`, { message: input });
-      setMessages(prev => [...prev, { role: 'assistant', content: res.data.response, loaded_pages: res.data.loaded_pages }]);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: res.data.response,
+        loaded_pages: res.data.loaded_pages,
+        tool_events: res.data.tool_events,
+      }]);
     } catch (err) {
       console.error("Chat error", err);
       setMessages(prev => [...prev, { role: 'assistant', content: "Error: Failed to get response from agent." }]);
@@ -193,6 +252,9 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
                             </span>
                           ))}
                         </div>
+                      )}
+                      {m.tool_events && m.tool_events.length > 0 && (
+                        <ToolEvents events={m.tool_events} />
                       )}
                       <div className="prose prose-sm prose-slate max-w-none prose-chat">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>

@@ -66,6 +66,7 @@ def append_turn(
     user_message: str,
     assistant_message: str,
     loaded_pages: list[dict[str, Any]] | None = None,
+    tool_events: list[dict[str, Any]] | None = None,
 ) -> None:
     record = ensure_session_record(meta[session_id], session_id)
     now = iso_now()
@@ -73,6 +74,8 @@ def append_turn(
     assistant_record = {"role": "assistant", "content": assistant_message}
     if loaded_pages is not None:
         assistant_record["loaded_pages"] = loaded_pages
+    if tool_events is not None:
+        assistant_record["tool_events"] = tool_events
     record["transcript"].append(assistant_record)
 
     episode = record["active_episode"]
