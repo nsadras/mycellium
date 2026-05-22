@@ -6,6 +6,7 @@ import uuid
 
 from server.runtime import (
     DEFAULT_MAX_TURNS,
+    append_tool_event_logs,
     append_turn,
     ensure_session_record,
     flush_session_episode,
@@ -129,6 +130,7 @@ async def chat(session_id: str, req: ChatRequest):
     ]
     append_turn(meta, session_id, req.message, response_text, loaded_page_meta, tool_events)
     turn_count = int(meta[session_id]["active_episode"].get("turn_count", 0))
+    tool_log_entries = append_tool_event_logs(session_id, episode_id, tool_events, turn_count)
     save_meta(meta)
     auto_flush = None
     if turn_count >= DEFAULT_MAX_TURNS:
@@ -138,6 +140,7 @@ async def chat(session_id: str, req: ChatRequest):
         "response": response_text,
         "loaded_pages": loaded_page_meta,
         "tool_events": tool_events,
+        "tool_logs_created": len(tool_log_entries),
         "episode_id": episode_id,
         "auto_flush": auto_flush,
     }

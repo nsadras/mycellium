@@ -76,6 +76,10 @@ class Mycelium:
     def wiki(self) -> WikiStore:
         return self._wiki
 
+    @property
+    def log_store(self) -> LogStore:
+        return self._log_store
+
     async def load_context(
         self,
         query: str,

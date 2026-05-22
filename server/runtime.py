@@ -4,8 +4,10 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+import uuid
 
 import mycelium
+from mycelium.models import LogEntry
 
 SESSIONS_FILE = Path("mnemos_store/sessions_meta.json")
 DEFAULT_IDLE_MINUTES = 20
@@ -83,6 +85,78 @@ def append_turn(
     episode["buffer"].append(assistant_record)
     episode["turn_count"] = int(episode.get("turn_count", 0)) + 1
     episode["last_activity_at"] = now
+
+
+def _format_tool_observation_content(
+    *,
+    chat_session_id: str,
+    episode_id: str,
+    turn_count: int,
+    tool_event: dict[str, Any],
+) -> str:
+    status = "failed" if tool_event.get("failed") else "succeeded"
+    arguments = json.dumps(tool_event.get("arguments", {}), indent=2, sort_keys=True)
+    result = str(tool_event.get("result", "")).strip()
+    truncated = "yes" if tool_event.get("truncated") else "no"
+
+    return "\n".join(
+        [
+            "Tool observation from chat.",
+            "",
+            f"- chat_session_id: {chat_session_id}",
+            f"- episode_id: {episode_id}",
+            f"- turn_count: {turn_count}",
+            f"- tool_name: {tool_event.get('tool_name', 'unknown')}",
+            f"- status: {status}",
+            f"- truncated: {truncated}",
+            "",
+            "Arguments:",
+            "```json",
+            arguments,
+            "```",
+            "",
+            "Result:",
+            result or "(empty result)",
+        ]
+    )
+
+
+def append_tool_event_logs(
+    session_id: str,
+    episode_id: str,
+    tool_events: list[dict[str, Any]],
+    turn_count: int,
+) -> list[LogEntry]:
+    if not tool_events:
+        return []
+
+    mem = get_mem()
+    now = utc_now()
+    date_str = now.strftime("%Y-%m-%d")
+    created_entries = []
+
+    for tool_event in tool_events:
+        short_id = str(uuid.uuid4())[:8]
+        entry = LogEntry(
+            entry_id=f"{date_str}#tool-{short_id}",
+            session_id=episode_id,
+            timestamp=now,
+            content=_format_tool_observation_content(
+                chat_session_id=session_id,
+                episode_id=episode_id,
+                turn_count=turn_count,
+                tool_event=tool_event,
+            ),
+            importance=0.5,
+            status="raw",
+            durability="durable",
+            consolidated=False,
+            decay_score=1.0,
+        )
+        mem.log_store.append(entry)
+        created_entries.append(entry)
+
+    return created_entries
 
 
 def recent_thread_context(record: dict[str, Any], limit: int = 8) -> str:
