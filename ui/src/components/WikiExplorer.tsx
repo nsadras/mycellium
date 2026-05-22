@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import { Search, Tag, Clock, ShieldCheck, ChevronRight, Book, History as HistoryIcon, Pencil, Save, X } from 'lucide-react';
 import api, { type WikiPage } from '../lib/api';
 import { clsx, type ClassValue } from 'clsx';
@@ -246,7 +248,9 @@ export default function WikiExplorer() {
             ) : (
               <>
                 <div className="prose prose-slate prose-indigo max-w-none mb-10">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{pageData.content || ''}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                    {pageData.content || ''}
+                  </ReactMarkdown>
                 </div>
                 {pageData.source_log_entries && pageData.source_log_entries.length > 0 && (
                   <section className="mb-16 border-t border-slate-100 pt-8">

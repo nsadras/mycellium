@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import { BookOpen, Check, ChevronDown, ChevronRight, Globe, Pencil, Send, Plus, History, X } from 'lucide-react';
 import api, { type Session, type Message } from '../lib/api';
 import { clsx, type ClassValue } from 'clsx';
@@ -257,7 +259,9 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
                         <ToolEvents events={m.tool_events} />
                       )}
                       <div className="prose prose-sm prose-slate max-w-none prose-chat">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                          {m.content}
+                        </ReactMarkdown>
                       </div>
                     </>
                   )}
