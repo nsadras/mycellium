@@ -30,7 +30,7 @@ class DreamConfig:
     schedule: str = 'post_session'
     cron_expression: str = '0 2 * * *'
     strategy: str = 'full'
-    conflict_policy: str = 'fork'
+    conflict_policy: str = 'override'
     max_pages_per_run: int = 20
 
 @dataclass
@@ -98,7 +98,7 @@ class Config:
             schedule=dream_data.get('schedule', 'post_session'),
             cron_expression=dream_data.get('cron_expression', '0 2 * * *'),
             strategy=dream_data.get('strategy', 'full'),
-            conflict_policy=dream_data.get('conflict_policy', 'fork'),
+            conflict_policy=dream_data.get('conflict_policy', 'override'),
             max_pages_per_run=dream_data.get('max_pages_per_run', 20)
         )
         

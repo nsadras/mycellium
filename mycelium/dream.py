@@ -15,6 +15,7 @@ from mycelium.structured_outputs import (
     WikiIndexOutput,
     WikiMergeOutput,
     WikiRewriteOutput,
+    PredictionErrorOutput,
 )
 
 
@@ -43,7 +44,7 @@ class DreamProcess:
         self,
         strategy: Literal['full', 'new_only', 'association_only'] = 'full',
         dry_run: bool = False,
-        conflict_policy: Literal['fork', 'override', 'merge'] = 'fork',
+        conflict_policy: Literal['fork', 'override', 'merge'] = 'override',
     ) -> DreamReport:
         
         entries = self.logs.get_unconsolidated()
@@ -162,8 +163,30 @@ class DreamProcess:
                 pages_created += 1
             else:
                 # Handle conflict
-                # For simplicity in this implementation, we just override or fork
-                if conflict_policy == "override":
+                # If policy is 'fork', we only fork if there is an actual semantic contradiction/prediction error.
+                # Otherwise we perform an in-place update (override).
+                should_fork = False
+                discrepancy_score = 0.0
+                reason = "Dream consolidation: in-place update"
+                
+                if conflict_policy == "fork":
+                    try:
+                        system_pe, user_pe = prompts.prediction_error_prompt(existing_page.content, entries_str)
+                        pe = await self.llm.call_structured(system_pe, user_pe, PredictionErrorOutput)
+                        if isinstance(pe, dict):
+                            conflict_type = pe.get("conflict_type", "none")
+                            discrepancy_score = float(pe.get("discrepancy_score", 0.0))
+                            if conflict_type in ("partial", "major") or discrepancy_score >= 0.5:
+                                should_fork = True
+                                reason = f"Forked during dream due to {conflict_type} conflict: {pe.get('explanation', '')}"
+                            else:
+                                reason = f"Dream consolidation: in-place update (policy was fork, but no contradiction found: conflict_type={conflict_type})"
+                    except Exception as e:
+                        # Fallback: if check fails, do not fork, default to in-place override to prevent fork pollution
+                        should_fork = False
+                        reason = f"Dream consolidation: in-place update (policy was fork, but prediction error check failed: {e})"
+                
+                if conflict_policy == "override" or (conflict_policy == "fork" and not should_fork):
                     existing_page.title = title
                     existing_page.content = content
                     existing_page.tags = tags
@@ -172,7 +195,16 @@ class DreamProcess:
                     existing_page.version += 1
                     existing_page.last_updated = now
                     
-                    log = UpdateLogEntry(existing_page.version, now, "system", "dream", 0.0, "Dream consolidation", existing_page.confidence, confidence)
+                    log = UpdateLogEntry(
+                        existing_page.version,
+                        now,
+                        "system",
+                        "dream",
+                        discrepancy_score,
+                        reason,
+                        existing_page.confidence,
+                        confidence,
+                    )
                     existing_page.confidence = confidence
                     existing_page.importance = importance
                     existing_page.update_log.append(log)
@@ -180,7 +212,7 @@ class DreamProcess:
                     if not dry_run:
                         self.wiki.save(existing_page)
                     pages_updated += 1
-                elif conflict_policy == "fork":
+                elif conflict_policy == "fork" and should_fork:
                     fork_slug = f"{page_slug}-fork-{str(uuid.uuid4())[:4]}"
                     fork_page = WikiPage(
                         slug=fork_slug,
@@ -195,7 +227,16 @@ class DreamProcess:
                         tags=tags,
                         related=related_edges + [Edge(page_slug, "contradicts", 1.0)],
                         source_log_entries=source_entry_ids,
-                        update_log=[UpdateLogEntry(1, now, "system", "dream", 1.0, "Forked during dream", 0.0, confidence)]
+                        update_log=[UpdateLogEntry(
+                            1,
+                            now,
+                            "system",
+                            "dream",
+                            discrepancy_score,
+                            reason,
+                            0.0,
+                            confidence,
+                        )]
                     )
                     
                     existing_page.related.append(Edge(fork_slug, "contradicts", 1.0))

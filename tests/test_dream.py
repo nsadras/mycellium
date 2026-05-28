@@ -144,3 +144,119 @@ async def test_dream_process_merges_same_title_creates(dream_process, mock_llm, 
     assert report.pages_updated == 1
     assert list(saved_pages) == ["rlhf"]
     assert saved_pages["rlhf"].content == "Second"
+
+
+@pytest.mark.asyncio
+async def test_dream_process_fork_on_actual_contradiction(dream_process, mock_llm, mock_wiki, mock_logs):
+    entry = LogEntry(
+        entry_id="2026-05-10#Entry1",
+        session_id="ses-123",
+        timestamp=datetime.now(),
+        content="Contradictory experience",
+        importance=0.8,
+        status="raw"
+    )
+    mock_logs.get_unconsolidated.return_value = [entry]
+    mock_wiki.get_index.return_value = "# Index"
+    mock_wiki.list_all.return_value = []
+    
+    saved_pages = {}
+    def exists(slug):
+        return slug in saved_pages or slug == "existing-page"
+    def save(page):
+        saved_pages[page.slug] = page
+    mock_wiki.exists.side_effect = exists
+    mock_wiki.save.side_effect = save
+
+    existing = WikiPage(
+        slug="existing-page", title="Existing", content="Original content",
+        created=datetime.now(), last_updated=datetime.now(),
+        version=1, confidence=0.8, decay_score=1.0, importance=0.5
+    )
+    mock_wiki.get.return_value = existing
+
+    # LLM calls:
+    # 1. Identify
+    # 2. Rewrite
+    # 3. Prediction Error check (returns contradiction!)
+    # 4. Update index
+    mock_llm.call_structured.side_effect = [
+        [{"page": "existing-page", "action": "update"}],
+        {"title": "Existing Title", "content": "Updated contradictory content", "confidence": 0.9, "importance": 0.8},
+        {"conflict_type": "major", "discrepancy_score": 0.8, "explanation": "Strong contradiction detected", "suggested_update": None},
+        {"index": "# Updated Index"}
+    ]
+
+    report = await dream_process.run(strategy="full", conflict_policy="fork")
+
+    assert report.pages_created == 1
+    assert report.pages_updated == 1
+    assert report.conflicts_resolved == 1
+    assert report.conflicts_found == ["existing-page"]
+    
+    # We should have a fork page saved
+    fork_slug = [k for k in saved_pages.keys() if k.startswith("existing-page-fork-")][0]
+    fork_page = saved_pages[fork_slug]
+    assert fork_page.content == "Updated contradictory content"
+    assert fork_page.title == "Existing Title (Fork)"
+    assert any(edge.target == "existing-page" and edge.relation == "contradicts" for edge in fork_page.related)
+    
+    # Existing page should have a reference to the fork, and lower confidence
+    assert existing.confidence == pytest.approx(0.7) # 0.8 - 0.1
+    assert any(edge.target == fork_slug and edge.relation == "contradicts" for edge in existing.related)
+
+
+@pytest.mark.asyncio
+async def test_dream_process_override_on_non_contradiction(dream_process, mock_llm, mock_wiki, mock_logs):
+    entry = LogEntry(
+        entry_id="2026-05-10#Entry1",
+        session_id="ses-123",
+        timestamp=datetime.now(),
+        content="Additive experience",
+        importance=0.8,
+        status="raw"
+    )
+    mock_logs.get_unconsolidated.return_value = [entry]
+    mock_wiki.get_index.return_value = "# Index"
+    mock_wiki.list_all.return_value = []
+    
+    saved_pages = {}
+    def exists(slug):
+        return slug in saved_pages or slug == "existing-page"
+    def save(page):
+        saved_pages[page.slug] = page
+    mock_wiki.exists.side_effect = exists
+    mock_wiki.save.side_effect = save
+
+    existing = WikiPage(
+        slug="existing-page", title="Existing", content="Original content",
+        created=datetime.now(), last_updated=datetime.now(),
+        version=1, confidence=0.8, decay_score=1.0, importance=0.5
+    )
+    mock_wiki.get.return_value = existing
+
+    # LLM calls:
+    # 1. Identify
+    # 2. Rewrite
+    # 3. Prediction Error check (returns non-contradiction / additive!)
+    # 4. Update index
+    mock_llm.call_structured.side_effect = [
+        [{"page": "existing-page", "action": "update"}],
+        {"title": "Existing Title", "content": "Updated additive content", "confidence": 0.9, "importance": 0.8},
+        {"conflict_type": "additive", "discrepancy_score": 0.2, "explanation": "Compatible additive update", "suggested_update": None},
+        {"index": "# Updated Index"}
+    ]
+
+    report = await dream_process.run(strategy="full", conflict_policy="fork")
+
+    # Should NOT have created a fork page, just updated existing-page in place!
+    assert report.pages_created == 0
+    assert report.pages_updated == 1
+    assert report.conflicts_resolved == 0
+    assert report.conflicts_found == []
+    
+    assert not any(k.startswith("existing-page-fork-") for k in saved_pages.keys())
+    assert existing.content == "Updated additive content"
+    assert existing.confidence == 0.9
+    assert existing.version == 2
+

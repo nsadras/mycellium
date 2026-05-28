@@ -51,6 +51,8 @@ Create a new page only when no existing page can reasonably absorb the informati
 Use stable lowercase slug names with hyphens, for example "user-profile" or "reinforcement-learning". Do not return placeholder names like "Page 1", "Topic A", or "New Page".
 If multiple log entries concern the same theme, return one page target for that theme.
 
+Important: Log entries with IDs starting with 'tool-' contain direct system tool observations (such as web search or fetch results). Carefully analyze these search results. Extract specific, factual, and actionable details discovered during these queries (e.g., specific library syntax, API specifications, hardware details, or custom scientific facts requested by the user) and identify appropriate wiki pages to create or update to store this permanent knowledge.
+
 Return a JSON list of objects, each with:
 - "page": the slug of the wiki page
 - "action": one of "update", "create", or "none"
@@ -66,13 +68,15 @@ RECENT LOG ENTRIES:
 def consolidation_rewrite_prompt(existing_page: str, log_entries: str) -> tuple[str, str]:
     system = """You are rewriting a wiki page to incorporate new experience.
 Rules:
-- Abstract, do not summarize. Extract the principle, not the event.
+- PERSONALIZATION vs GENERAL KNOWLEDGE: The wiki is a Personalized User-Agent Ledger, not a generic encyclopedia. NEVER write general textbook information that is already in your pre-trained weights (e.g. general explanations of basic algorithms, basic Python tutorials). However, you MUST capture specific, specialized, or newly-discovered factual knowledge retrieved via tool calls/web searches (e.g., library version compatibility, fresh API syntaxes, hardware compatibility tables, or documentation pages fetched during the session) that are highly relevant to the user's project. This is information you had to fetch because it is NOT stored in your weights. Save these facts alongside the user's specific decisions, variables, configurations, folder paths, and preferences so they are permanently accessible.
+- CAPTURE TOOL RESULTS: Log entries with IDs starting with 'tool-' contain direct system tool observations (such as web search or page fetch results). Integrate any fresh factual discoveries, library version numbers, specific API specifications, or technical details uncovered by these tools into the wiki page to preserve them in permanent context. Do not ignore these search discoveries; they represent the exact new factual information retrieved because it wasn't in your weights!
+- ABSTRACT EVENTS, PRESERVE DETAILS: When processing logs, abstract the specific chat turn, but do NOT strip away crucial actionable details like custom file names, custom directories, variable names, or hardware models. Preserve these specifics, but write them as durable facts rather than episodic stories (e.g. write 'The BCI project uses a custom POMDP loop' rather than 'The user said they want to use POMDP').
+- AVOID EPISODIC STORIES: Do not write pages as a chronological diary of your chats (e.g. skip 'On May 28, the user asked...'). Write them as structured technical documents or profile cards describing the current status, configurations, and design specifications of the user's project.
 - Keep the page focused on one coherent semantic topic. Do not produce the same broad page title for unrelated slugs.
 - Resolve conflicts explicitly: if new info contradicts existing content, choose the more recent/credible version and note the revision.
 - Update confidence score based on how much evidence now supports this.
 - Update related: links if new connections are apparent.
 - Increment version.
-- Do NOT include specific dates, people's names, or episodic details unless they are themselves the principle being recorded.
 - Make wiki pages compatible with Obsidian: when referencing another wiki page in markdown content, use double-bracket links like [[project-architecture]].
 - Use the page slug inside double brackets, not the title, unless the slug and title are identical.
 - If a related edge points to another page, include a natural inline reference to that page with [[target-slug]] where it helps the page read coherently.

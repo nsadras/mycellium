@@ -22,7 +22,7 @@ class Mycelium:
         lability_threshold: float = 0.35,
         dream_schedule: Literal['post_session', 'cron', 'manual'] = 'post_session',
         decay_interval_hours: int = 6,
-        conflict_policy: Literal['fork', 'override', 'merge'] = 'fork',
+        conflict_policy: Literal['fork', 'override', 'merge'] = 'override',
         git_commits: bool = False,
         config_path: str | Path | None = None,
     ):
