@@ -1,7 +1,9 @@
-import { BrainCircuit, Loader2, Moon, Radio, Sparkles, Waves } from 'lucide-react';
+import { useState } from 'react';
+import { Settings, X } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { AssistantStatus } from '../lib/assistantStatus';
+import { avatarsRegistry } from './avatars';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -20,67 +22,155 @@ const activityCopy: Record<AssistantStatus['activity'], { label: string; detail:
   error: { label: 'Error', detail: 'Check logs' },
 };
 
-function ActivityIcon({ activity }: { activity: AssistantStatus['activity'] }) {
-  if (activity === 'dreaming') return <Moon size={22} />;
-  if (activity === 'flushing') return <Waves size={22} />;
-  if (activity === 'decaying') return <Radio size={22} />;
-  if (activity === 'reconsolidating') return <BrainCircuit size={22} />;
-  if (activity === 'thinking' || activity === 'tool_calling' || activity === 'responding') {
-    return <Loader2 size={22} className="animate-spin" />;
-  }
-  return <Sparkles size={22} />;
-}
-
 export default function Avatar({ status }: { status: AssistantStatus }) {
+  const [selectedAvatarId, setSelectedAvatarId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('mycellium_avatar') || 'myco';
+    } catch {
+      return 'myco';
+    }
+  });
+  const [showStateText, setShowStateText] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mycellium_avatar_show_state') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [showSelector, setShowSelector] = useState(false);
+
   const copy = activityCopy[status.activity];
   const label = status.label ?? copy.label;
   const detail = status.detail ?? copy.detail;
   const active = status.activity !== 'idle' && status.activity !== 'error';
 
+  // Find the selected avatar definition
+  const avatarDef = avatarsRegistry.find(a => a.id === selectedAvatarId) || avatarsRegistry[0];
+  const AvatarComponent = avatarDef.Component;
+
+  const handleSelectAvatar = (id: string) => {
+    setSelectedAvatarId(id);
+    setShowSelector(false);
+    try {
+      localStorage.setItem('mycellium_avatar', id);
+    } catch (err) {
+      console.error('Failed to save avatar choice to localStorage', err);
+    }
+  };
+
+  const handleToggleStateText = () => {
+    const nextVal = !showStateText;
+    setShowStateText(nextVal);
+    try {
+      localStorage.setItem('mycellium_avatar_show_state', String(nextVal));
+    } catch (err) {
+      console.error('Failed to save state text preference', err);
+    }
+  };
+
   return (
     <div
       className={cn(
-        "mx-4 mb-4 rounded-lg border p-3 transition-colors",
+        "group relative mx-4 mb-4 rounded-xl border p-3.5 transition-all duration-300 overflow-hidden",
         status.activity === 'error'
-          ? "border-rose-800 bg-rose-950/50"
+          ? "border-rose-900/60 bg-rose-950/20 shadow-lg shadow-rose-950/25"
           : active
-            ? "border-indigo-700 bg-slate-800"
-            : "border-slate-800 bg-slate-950/40"
+            ? "border-indigo-800/80 bg-slate-800/60 shadow-lg shadow-indigo-950/25"
+            : "border-slate-800/80 bg-slate-950/20"
       )}
       aria-live="polite"
     >
-      <div className="flex items-center gap-3">
-        <div
-          className={cn(
-            "relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white",
-            status.activity === 'error'
-              ? "bg-rose-600"
-              : status.activity === 'dreaming'
-                ? "bg-violet-600"
-                : status.activity === 'flushing'
-                  ? "bg-cyan-600"
-                  : active
-                    ? "bg-indigo-600"
-                    : "bg-slate-700"
-          )}
+      {/* Settings gear toggle button - visible on panel hover */}
+      {!showSelector && (
+        <button
+          type="button"
+          onClick={() => setShowSelector(true)}
+          title="Change avatar settings..."
+          className="absolute right-2 top-2 p-1 rounded-md text-slate-500 hover:text-white hover:bg-slate-800/80 transition-all opacity-0 group-hover:opacity-100 duration-200 z-10"
         >
-          {active && (
-            <span
+          <Settings size={15} />
+        </button>
+      )}
+
+      {showSelector ? (
+        /* Selector overlay view (vertical list with descriptions + debug toggle) */
+        <div className="flex flex-col items-center justify-between w-full min-h-[140px] py-1 relative">
+          <div className="flex items-center justify-between w-full mb-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Select Avatar</span>
+            <button
+              type="button"
+              onClick={() => setShowSelector(false)}
+              className="p-1 rounded text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          
+          <div className="flex flex-col gap-2 w-full">
+            {avatarsRegistry.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleSelectAvatar(item.id)}
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg text-xs font-bold transition-all border text-left flex flex-col gap-0.5",
+                  item.id === selectedAvatarId
+                    ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/10"
+                    : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700"
+                )}
+              >
+                <span className="font-bold">{item.name}</span>
+                <span className={cn("text-[10px] font-normal", item.id === selectedAvatarId ? "text-indigo-200" : "text-slate-500")}>
+                  {item.description}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between w-full mt-3.5 pt-3 border-t border-slate-800/80">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Show State Info</span>
+            <button
+              type="button"
+              onClick={handleToggleStateText}
               className={cn(
-                "absolute inset-0 rounded-lg opacity-60",
-                status.activity === 'listening' ? "animate-ping bg-emerald-400" : "animate-pulse bg-white"
+                "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                showStateText ? "bg-indigo-600" : "bg-slate-800"
               )}
-            />
+              aria-label="Toggle mascot state details"
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  showStateText ? "translate-x-4" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* Display avatar and status details vertically (centered) */
+        <div className="flex flex-col items-center gap-3">
+          <div className="relative flex h-40 w-40 shrink-0 items-center justify-center">
+            <span className="relative w-full h-full flex items-center justify-center">
+              <AvatarComponent activity={status.activity} status={status} />
+            </span>
+          </div>
+          
+          {showStateText && (
+            <div className="w-full text-center mt-1 animate-fade-in">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                Mascot State
+              </div>
+              <div className="text-base font-extrabold text-white leading-tight mb-1">
+                {label}
+              </div>
+              <div className="text-xs text-slate-400 leading-normal px-2">
+                {detail}
+              </div>
+            </div>
           )}
-          <span className="relative">
-            <ActivityIcon activity={status.activity} />
-          </span>
         </div>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-white">{label}</div>
-          <div className="truncate text-xs text-slate-400">{detail}</div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

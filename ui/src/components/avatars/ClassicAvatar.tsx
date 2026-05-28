@@ -1,0 +1,21 @@
+import { BrainCircuit, Loader2, Moon, Radio, Sparkles, Waves } from 'lucide-react';
+import type { AvatarProps } from './index';
+
+export default function ClassicAvatar({ activity }: AvatarProps) {
+  if (activity === 'dreaming') {
+    return <Moon size={28} className="text-white animate-pulse" />;
+  }
+  if (activity === 'flushing') {
+    return <Waves size={28} className="text-white animate-pulse" />;
+  }
+  if (activity === 'decaying') {
+    return <Radio size={28} className="text-white animate-pulse" />;
+  }
+  if (activity === 'reconsolidating') {
+    return <BrainCircuit size={28} className="text-white animate-pulse" />;
+  }
+  if (activity === 'thinking' || activity === 'tool_calling' || activity === 'responding') {
+    return <Loader2 size={28} className="text-white animate-spin" />;
+  }
+  return <Sparkles size={28} className="text-white" />;
+}
