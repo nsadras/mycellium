@@ -309,11 +309,16 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
                 const nextValue = e.target.value;
                 setInput(nextValue);
                 if (!isLoading) {
-                  setAssistantStatus(
-                    nextValue.trim()
-                      ? { activity: 'listening', label: 'Listening', detail: 'Composing' }
-                      : { activity: 'idle', label: 'Idle', detail: selectedId ? 'Ready' : 'Select a session' }
-                  );
+                  setAssistantStatus(prev => {
+                    const isNextEmpty = !nextValue.trim();
+                    const nextActivity = isNextEmpty ? 'idle' : 'listening';
+                    if (prev.activity === nextActivity) {
+                      return prev;
+                    }
+                    return isNextEmpty
+                      ? { activity: 'idle', label: 'Idle', detail: selectedId ? 'Ready' : 'Select a session' }
+                      : { activity: 'listening', label: 'Listening', detail: 'Composing' };
+                  });
                 }
               }}
               placeholder={selectedId ? "Send a message..." : "Select a session first"}
