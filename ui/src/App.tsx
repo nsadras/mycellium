@@ -4,12 +4,31 @@ import Chat from './components/Chat';
 import WikiExplorer from './components/WikiExplorer';
 import LogExplorer from './components/LogExplorer';
 import Sidebar from './components/Sidebar';
+import { idleStatus, type AssistantActivity, type AssistantStatus } from './lib/assistantStatus';
+
+const memoryOperationStatus: Record<
+  'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory',
+  AssistantStatus
+> = {
+  'flush-current': { activity: 'flushing', label: 'Flushing', detail: 'Encoding selected episode' },
+  'flush-idle': { activity: 'flushing', label: 'Flushing', detail: 'Encoding idle episodes' },
+  'flush-all': { activity: 'flushing', label: 'Flushing', detail: 'Encoding all episodes' },
+  'reconsolidate-current': { activity: 'reconsolidating', label: 'Resolving', detail: 'Applying memory updates' },
+  dream: { activity: 'dreaming', label: 'Dreaming', detail: 'Consolidating logs' },
+  decay: { activity: 'decaying', label: 'Decaying', detail: 'Updating memory scores' },
+  'clear-memory': { activity: 'flushing', label: 'Clearing', detail: 'Resetting memory store' },
+};
+
+function isMemoryActivity(activity: AssistantActivity) {
+  return activity === 'flushing' || activity === 'dreaming' || activity === 'decaying' || activity === 'reconsolidating';
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'wiki' | 'logs'>('chat');
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [runningMemoryOperation, setRunningMemoryOperation] = useState<string | null>(null);
+  const [assistantStatus, setAssistantStatus] = useState<AssistantStatus>(idleStatus);
 
   useEffect(() => {
     fetchSessions();
@@ -57,6 +76,7 @@ function App() {
   const handleMemoryOperation = async (
     operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory'
   ) => {
+    let shouldResetStatus = true;
     try {
       if (operation === 'clear-memory') {
         const confirmed = window.confirm(
@@ -64,24 +84,30 @@ function App() {
         );
         if (!confirmed) return;
       }
-      setRunningMemoryOperation(operation);
       let res;
       if (operation === 'flush-current') {
         if (!selectedSessionId) {
           alert('Select a chat session first.');
           return;
         }
-        res = await api.post('/memory/episodes/flush', { session_id: selectedSessionId });
-      } else if (operation === 'flush-idle') {
-        res = await api.post('/memory/episodes/flush-idle', { idle_minutes: 20, max_turns: 25 });
-      } else if (operation === 'flush-all') {
-        res = await api.post('/memory/episodes/flush-all');
       } else if (operation === 'reconsolidate-current') {
         if (!selectedSessionId) {
           alert('Select a chat session first.');
           return;
         }
-        res = await api.post('/memory/reconsolidation/resolve', { session_id: selectedSessionId });
+      }
+
+      setRunningMemoryOperation(operation);
+      setAssistantStatus(memoryOperationStatus[operation]);
+
+      if (operation === 'flush-current') {
+        res = await api.post('/memory/episodes/flush', { session_id: selectedSessionId! });
+      } else if (operation === 'flush-idle') {
+        res = await api.post('/memory/episodes/flush-idle', { idle_minutes: 20, max_turns: 25 });
+      } else if (operation === 'flush-all') {
+        res = await api.post('/memory/episodes/flush-all');
+      } else if (operation === 'reconsolidate-current') {
+        res = await api.post('/memory/reconsolidation/resolve', { session_id: selectedSessionId! });
       } else if (operation === 'decay') {
         res = await api.post('/memory/decay');
       } else if (operation === 'clear-memory') {
@@ -92,9 +118,15 @@ function App() {
       alert(`${operation.replaceAll('-', ' ')} complete:\n${JSON.stringify(res.data, null, 2)}`);
     } catch (err) {
       console.error("Memory operation failed", err);
+      shouldResetStatus = false;
+      setAssistantStatus({ activity: 'error', label: 'Operation failed', detail: 'Check backend logs' });
+      window.setTimeout(() => setAssistantStatus(idleStatus), 2500);
       alert('Memory operation failed. Check the console and backend logs.');
     } finally {
       setRunningMemoryOperation(null);
+      if (shouldResetStatus && isMemoryActivity(memoryOperationStatus[operation].activity)) {
+        setAssistantStatus(idleStatus);
+      }
     }
   };
 
@@ -107,6 +139,7 @@ function App() {
         onMemoryOperation={handleMemoryOperation}
         hasSelectedSession={Boolean(selectedSessionId)}
         runningMemoryOperation={runningMemoryOperation}
+        assistantStatus={assistantStatus}
       />
       
       <main className="flex-1 flex flex-col min-w-0 h-full">
@@ -117,6 +150,7 @@ function App() {
             onSelect={setSelectedSessionId}
             onCreate={handleCreateSession}
             onRename={handleRenameSession}
+            setAssistantStatus={setAssistantStatus}
           />
         )}
         {activeTab === 'wiki' && <WikiExplorer />}

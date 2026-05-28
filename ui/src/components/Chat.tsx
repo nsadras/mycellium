@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { BookOpen, Check, ChevronDown, ChevronRight, Globe, Pencil, Send, Plus, History, X } from 'lucide-react';
 import api, { type Session, type Message } from '../lib/api';
+import type { AssistantStatus } from '../lib/assistantStatus';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -72,9 +73,10 @@ interface ChatProps {
   onSelect: (id: string) => void;
   onCreate: (query?: string) => void;
   onRename: (id: string, query: string) => void;
+  setAssistantStatus: (status: AssistantStatus) => void;
 }
 
-export default function Chat({ sessions, selectedId, onSelect, onCreate, onRename }: ChatProps) {
+export default function Chat({ sessions, selectedId, onSelect, onCreate, onRename, setAssistantStatus }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -88,6 +90,7 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
     } else {
       setMessages([]);
     }
+    setAssistantStatus({ activity: 'idle', label: 'Idle', detail: selectedId ? 'Ready' : 'Select a session' });
   }, [selectedId]);
 
   useEffect(() => {
@@ -113,9 +116,16 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
     setMessages([...messages, userMsg]);
     setInput('');
     setIsLoading(true);
+    setAssistantStatus({ activity: 'thinking', label: 'Thinking', detail: 'Calling model' });
+    let shouldResetStatus = true;
 
     try {
       const res = await api.post(`/sessions/${selectedId}/chat`, { message: input });
+      if (res.data.tool_events?.length > 0) {
+        setAssistantStatus({ activity: 'tool_calling', label: 'Tool calls complete', detail: `${res.data.tool_events.length} result${res.data.tool_events.length === 1 ? '' : 's'}` });
+      } else {
+        setAssistantStatus({ activity: 'responding', label: 'Responding', detail: 'Rendering reply' });
+      }
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: res.data.response,
@@ -124,9 +134,19 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
       }]);
     } catch (err) {
       console.error("Chat error", err);
+      shouldResetStatus = false;
+      setAssistantStatus({ activity: 'error', label: 'Chat failed', detail: 'Check backend logs' });
+      window.setTimeout(() => {
+        setAssistantStatus({ activity: 'idle', label: 'Idle', detail: 'Ready' });
+      }, 2500);
       setMessages(prev => [...prev, { role: 'assistant', content: "Error: Failed to get response from agent." }]);
     } finally {
       setIsLoading(false);
+      if (shouldResetStatus) {
+        window.setTimeout(() => {
+          setAssistantStatus({ activity: 'idle', label: 'Idle', detail: 'Ready' });
+        }, 900);
+      }
     }
   };
 
@@ -285,7 +305,17 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
             <input
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setInput(nextValue);
+                if (!isLoading) {
+                  setAssistantStatus(
+                    nextValue.trim()
+                      ? { activity: 'listening', label: 'Listening', detail: 'Composing' }
+                      : { activity: 'idle', label: 'Idle', detail: selectedId ? 'Ready' : 'Select a session' }
+                  );
+                }
+              }}
               placeholder={selectedId ? "Send a message..." : "Select a session first"}
               disabled={!selectedId || isLoading}
               className="w-full bg-slate-100 border-none rounded-xl pl-4 pr-12 py-3 focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 transition-all shadow-inner"

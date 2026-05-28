@@ -1,6 +1,8 @@
 import { Archive, Book, BrainCircuit, FileText, Loader2, MessageSquare, Moon, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import Avatar from './Avatar';
+import type { AssistantStatus } from '../lib/assistantStatus';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -15,6 +17,7 @@ interface SidebarProps {
   ) => void;
   hasSelectedSession: boolean;
   runningMemoryOperation: string | null;
+  assistantStatus: AssistantStatus;
 }
 
 export default function Sidebar({
@@ -24,6 +27,7 @@ export default function Sidebar({
   onMemoryOperation,
   hasSelectedSession,
   runningMemoryOperation,
+  assistantStatus,
 }: SidebarProps) {
   const tabs = [
     { id: 'chat', label: 'Chat', icon: MessageSquare },
@@ -84,6 +88,8 @@ export default function Sidebar({
         </div>
         <h1 className="text-xl font-bold text-white tracking-tight">Mycelium</h1>
       </div>
+
+      <Avatar status={assistantStatus} />
 
       <nav className="flex-1 px-4 space-y-1">
         {tabs.map((tab) => (
