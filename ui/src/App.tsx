@@ -37,9 +37,10 @@ function App() {
   const fetchSessions = async () => {
     try {
       const res = await api.get('/sessions/');
-      setSessions(res.data);
-      if (res.data.length > 0 && !selectedSessionId) {
-        setSelectedSessionId(res.data[0].id);
+      const ordered = [...res.data].reverse();
+      setSessions(ordered);
+      if (ordered.length > 0 && !selectedSessionId) {
+        setSelectedSessionId(ordered[0].id);
       }
     } catch (err) {
       console.error("Failed to fetch sessions", err);
@@ -50,7 +51,7 @@ function App() {
     try {
       const name = query?.trim() || "New session";
       const res = await api.post('/sessions/', { query: name });
-      setSessions([...sessions, res.data]);
+      setSessions([res.data, ...sessions]);
       setSelectedSessionId(res.data.id);
       setActiveTab('chat');
     } catch (err) {
