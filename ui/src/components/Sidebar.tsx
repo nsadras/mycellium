@@ -13,7 +13,7 @@ interface SidebarProps {
   setActiveTab: (tab: 'chat' | 'wiki' | 'logs') => void;
   onDream: () => void;
   onMemoryOperation: (
-    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory'
+    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory' | 'clear-wiki'
   ) => void;
   hasSelectedSession: boolean;
   runningMemoryOperation: string | null;
@@ -70,6 +70,13 @@ export default function Sidebar({
       icon: RefreshCw,
       needsSession: false,
       tooltip: 'Recompute decay scores and archive weak memories.',
+    },
+    {
+      id: 'clear-wiki',
+      label: 'Clear Wiki Pages',
+      icon: Trash2,
+      needsSession: false,
+      tooltip: 'Delete all wiki pages but keep all episodic logs and sessions intact.',
     },
     {
       id: 'clear-memory',
@@ -158,7 +165,7 @@ export default function Sidebar({
           )}
         >
           {runningMemoryOperation === 'dream' ? <Loader2 size={18} className="animate-spin" /> : <Moon size={18} />}
-          Dream Pass
+          Dream
         </button>
       </div>
     </aside>

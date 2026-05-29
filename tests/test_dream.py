@@ -260,3 +260,78 @@ async def test_dream_process_override_on_non_contradiction(dream_process, mock_l
     assert existing.confidence == 0.9
     assert existing.version == 2
 
+
+@pytest.mark.asyncio
+async def test_dream_process_precise_log_routing(dream_process, mock_llm, mock_wiki, mock_logs):
+    # 1. Setup two distinct unconsolidated log entries
+    entry1 = LogEntry(
+        entry_id="2026-05-10#Entry1",
+        session_id="ses-123",
+        timestamp=datetime.now(),
+        content="Technical ReAct agent loop implementation details",
+        importance=0.8,
+        status="raw"
+    )
+    entry2 = LogEntry(
+        entry_id="2026-05-10#Entry2",
+        session_id="ses-123",
+        timestamp=datetime.now(),
+        content="User likes dark forest green styling and HSL obsidian panels",
+        importance=0.9,
+        status="raw"
+    )
+    mock_logs.get_unconsolidated.return_value = [entry1, entry2]
+    mock_wiki.get_index.return_value = "# Index"
+    mock_wiki.exists.return_value = False
+    mock_wiki.list_all.return_value = []
+    
+    saved_pages = {}
+    def save(page):
+        saved_pages[page.slug] = page
+    mock_wiki.save.side_effect = save
+
+    # 2. LLM response mocks
+    # First: Identify returns pages mapping to specific log entry IDs
+    # Second & Third: Rewrite outputs
+    # Fourth: Update index
+    mock_llm.call_structured.side_effect = [
+        # Identify pass maps each page to a specific log entry ID!
+        [
+            {"page": "react-loop", "action": "create", "log_entry_ids": ["2026-05-10#Entry1"]},
+            {"page": "user-profile", "action": "create", "log_entry_ids": ["2026-05-10#Entry2"]}
+        ],
+        # Rewrite for react-loop
+        {"title": "ReAct Loop", "content": "ReAct loop notes", "confidence": 0.9, "importance": 0.8},
+        # Rewrite for user-profile
+        {"title": "User Profile", "content": "Obsidian style preference", "confidence": 0.95, "importance": 0.9},
+        # Index update
+        {"index": "# Index\n- [[react-loop]]\n- [[user-profile]]"}
+    ]
+
+    report = await dream_process.run(strategy="full", conflict_policy="override")
+
+    assert report.pages_created == 2
+    assert report.entries_consolidated == 2
+
+    # Verify that the correct specific log entry content was fed to the rewrite calls
+    # Call 0 is Identify, Call 1 is Rewrite react-loop, Call 2 is Rewrite user-profile, Call 3 is Index
+    calls = mock_llm.call_structured.call_args_list
+    assert len(calls) == 4
+
+    # Call 1 (react-loop rewrite) should receive only entry1 content, NOT entry2 content
+    react_loop_rewrite_user_prompt = calls[1][0][1] # (system, user, output_class) -> user prompt is index 1
+    assert "Technical ReAct agent loop" in react_loop_rewrite_user_prompt
+    assert "User likes dark forest green" not in react_loop_rewrite_user_prompt
+
+    # Call 2 (user-profile rewrite) should receive only entry2 content, NOT entry1 content
+    user_profile_rewrite_user_prompt = calls[2][0][1]
+    assert "User likes dark forest green" in user_profile_rewrite_user_prompt
+    assert "Technical ReAct agent loop" not in user_profile_rewrite_user_prompt
+
+    # Verify saved page source links are also precisely isolated!
+    assert "react-loop" in saved_pages
+    assert "user-profile" in saved_pages
+    assert saved_pages["react-loop"].source_log_entries == ["2026-05-10#Entry1"]
+    assert saved_pages["user-profile"].source_log_entries == ["2026-05-10#Entry2"]
+
+

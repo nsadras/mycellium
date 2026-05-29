@@ -52,21 +52,37 @@ class DreamProcess:
         if not entries and strategy != 'association_only':
             return DreamReport(0, 0, 0, [], 0, None)
             
-        entries_str = "\n".join([
-            (
-                f"[{e.entry_id}] "
-                f"durability={e.durability}; importance={e.importance:.2f}\n{e.content}"
-            )
-            for e in entries
-        ])
         source_entry_ids = [e.entry_id for e in entries]
         index_content = self.wiki.get_index()
         
-        system, user = prompts.consolidation_identify_prompt(index_content, entries_str)
-        identification = await self.llm.call_structured(system, user, ConsolidationIdentifyOutput)
-        if not isinstance(identification, list):
-            identification = [identification] if isinstance(identification, dict) else []
-        identification = self._dedupe_identification(identification)
+        # Chunk entries to prevent overwhelming the local LLM context window
+        chunk_size = 15
+        all_targets = []
+        
+        for idx in range(0, len(entries), chunk_size):
+            chunk = entries[idx:idx + chunk_size]
+            chunk_str = "\n".join([
+                (
+                    f"[{e.entry_id}] "
+                    f"durability={e.durability}; importance={e.importance:.2f}\n{e.content}"
+                )
+                for e in chunk
+            ])
+            
+            system, user = prompts.consolidation_identify_prompt(index_content, chunk_str)
+            identification_res = await self.llm.call_structured(system, user, ConsolidationIdentifyOutput)
+            
+            chunk_targets = []
+            if isinstance(identification_res, dict):
+                chunk_targets = identification_res.get("targets", [])
+            elif isinstance(identification_res, list):
+                chunk_targets = identification_res
+            elif hasattr(identification_res, "targets"):
+                chunk_targets = identification_res.targets
+                
+            all_targets.extend(chunk_targets)
+            
+        identification = self._dedupe_identification(all_targets)
             
         pages_updated = 0
         pages_created = 0
@@ -83,14 +99,33 @@ class DreamProcess:
             
             if not page_slug or action not in ("update", "create"):
                 continue
+
+            # Determine relevant logs for this specific page
+            log_entry_ids = item.get("log_entry_ids", [])
+            if log_entry_ids and isinstance(log_entry_ids, list):
+                page_entries = [e for e in entries if e.entry_id in log_entry_ids]
+                # Fall back to all unconsolidated logs if none are found in the filtered list
+                if not page_entries:
+                    page_entries = entries
+            else:
+                page_entries = entries
+
+            page_entries_str = "\n".join([
+                (
+                    f"[{e.entry_id}] "
+                    f"durability={e.durability}; importance={e.importance:.2f}\n{e.content}"
+                )
+                for e in page_entries
+            ])
+            page_source_ids = [e.entry_id for e in page_entries]
                 
             if action == "update" and self.wiki.exists(page_slug):
                 existing_page = self.wiki.get(page_slug)
-                system, user = prompts.consolidation_rewrite_prompt(existing_page.content, entries_str)
+                system, user = prompts.consolidation_rewrite_prompt(existing_page.content, page_entries_str)
                 is_create = False
             else:
                 existing_page = None
-                system, user = prompts.consolidation_rewrite_prompt("", entries_str)
+                system, user = prompts.consolidation_rewrite_prompt("", page_entries_str)
                 is_create = True
             
             rewritten = await self.llm.call_structured(system, user, WikiRewriteOutput)
@@ -121,7 +156,7 @@ class DreamProcess:
                     existing_page.content = content
                     existing_page.tags = tags
                     existing_page.related = related_edges
-                    existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, source_entry_ids)
+                    existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, page_source_ids)
                     existing_page.version += 1
                     existing_page.last_updated = now
                     log = UpdateLogEntry(
@@ -154,7 +189,7 @@ class DreamProcess:
                     importance=importance,
                     tags=tags,
                     related=related_edges,
-                    source_log_entries=source_entry_ids,
+                    source_log_entries=page_source_ids,
                     update_log=[UpdateLogEntry(1, now, "system", "dream", 0.0, "Initial creation", 0.0, confidence)]
                 )
                 if not dry_run:
@@ -171,7 +206,7 @@ class DreamProcess:
                 
                 if conflict_policy == "fork":
                     try:
-                        system_pe, user_pe = prompts.prediction_error_prompt(existing_page.content, entries_str)
+                        system_pe, user_pe = prompts.prediction_error_prompt(existing_page.content, page_entries_str)
                         pe = await self.llm.call_structured(system_pe, user_pe, PredictionErrorOutput)
                         if isinstance(pe, dict):
                             conflict_type = pe.get("conflict_type", "none")
@@ -191,7 +226,7 @@ class DreamProcess:
                     existing_page.content = content
                     existing_page.tags = tags
                     existing_page.related = related_edges
-                    existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, source_entry_ids)
+                    existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, page_source_ids)
                     existing_page.version += 1
                     existing_page.last_updated = now
                     
@@ -226,7 +261,7 @@ class DreamProcess:
                         importance=importance,
                         tags=tags,
                         related=related_edges + [Edge(page_slug, "contradicts", 1.0)],
-                        source_log_entries=source_entry_ids,
+                        source_log_entries=page_source_ids,
                         update_log=[UpdateLogEntry(
                             1,
                             now,
@@ -260,7 +295,7 @@ class DreamProcess:
                     merged = await self.llm.call_structured(system, user, WikiMergeOutput)
                     if isinstance(merged, dict):
                         existing_page.content = merged.get("content", existing_page.content)
-                        existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, source_entry_ids)
+                        existing_page.source_log_entries = self._merge_sources(existing_page.source_log_entries, page_source_ids)
                         existing_page.version += 1
                         existing_page.last_updated = now
                         log = UpdateLogEntry(existing_page.version, now, "system", "dream", 0.0, "Merged during dream", existing_page.confidence, confidence)
@@ -320,11 +355,39 @@ class DreamProcess:
             slug = _slugify(str(page))
             if not slug or action == "none":
                 continue
+            # Safety block against numeric-only slug hallucinations (e.g. "1")
+            if slug.isdigit():
+                continue
+                
+            # Clean and normalize log entry IDs
+            raw_ids = item.get("log_entry_ids", [])
+            log_entry_ids = []
+            for r_id in raw_ids:
+                if isinstance(r_id, str):
+                    cleaned = r_id.strip("[]'\" ")
+                    if " — " in cleaned:
+                        cleaned = cleaned.split(" — ")[0]
+                    if " - " in cleaned:
+                        cleaned = cleaned.split(" - ")[0]
+                    cleaned = cleaned.strip()
+                    if cleaned and cleaned not in log_entry_ids:
+                        log_entry_ids.append(cleaned)
+                        
             existing = deduped.get(slug)
             if existing is None:
-                deduped[slug] = {"page": slug, "action": action}
-            elif existing["action"] == "create" and action == "update":
-                existing["action"] = "update"
+                deduped[slug] = {
+                    "page": slug,
+                    "action": action,
+                    "log_entry_ids": log_entry_ids
+                }
+            else:
+                if existing["action"] == "create" and action == "update":
+                    existing["action"] = "update"
+                # Merge log_entry_ids
+                existing_ids = existing.setdefault("log_entry_ids", [])
+                for entry_id in log_entry_ids:
+                    if entry_id not in existing_ids:
+                        existing_ids.append(entry_id)
         return list(deduped.values())
 
     def _existing_title_index(self) -> dict[str, str]:

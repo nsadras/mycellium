@@ -8,7 +8,7 @@ import SporeBackground from './components/SporeBackground';
 import { idleStatus, type AssistantActivity, type AssistantStatus } from './lib/assistantStatus';
 
 const memoryOperationStatus: Record<
-  'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory',
+  'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory' | 'clear-wiki',
   AssistantStatus
 > = {
   'flush-current': { activity: 'flushing', label: 'Flushing', detail: 'Encoding selected episode' },
@@ -18,6 +18,7 @@ const memoryOperationStatus: Record<
   dream: { activity: 'dreaming', label: 'Dreaming', detail: 'Consolidating logs' },
   decay: { activity: 'decaying', label: 'Decaying', detail: 'Updating memory scores' },
   'clear-memory': { activity: 'flushing', label: 'Clearing', detail: 'Resetting memory store' },
+  'clear-wiki': { activity: 'flushing', label: 'Clearing Wiki', detail: 'Resetting wiki index' },
 };
 
 function isMemoryActivity(activity: AssistantActivity) {
@@ -76,13 +77,18 @@ function App() {
   };
 
   const handleMemoryOperation = async (
-    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory'
+    operation: 'flush-current' | 'flush-idle' | 'flush-all' | 'reconsolidate-current' | 'dream' | 'decay' | 'clear-memory' | 'clear-wiki'
   ) => {
     let shouldResetStatus = true;
     try {
       if (operation === 'clear-memory') {
         const confirmed = window.confirm(
           'Delete all wiki pages and episodic logs? This is intended for development and cannot be undone.'
+        );
+        if (!confirmed) return;
+      } else if (operation === 'clear-wiki') {
+        const confirmed = window.confirm(
+          'Delete all wiki pages? This will reset the wiki, but keep all daily event logs and chat sessions intact.'
         );
         if (!confirmed) return;
       }
@@ -114,6 +120,8 @@ function App() {
         res = await api.post('/memory/decay');
       } else if (operation === 'clear-memory') {
         res = await api.post('/memory/dev/clear');
+      } else if (operation === 'clear-wiki') {
+        res = await api.post('/memory/dev/clear-wiki');
       } else {
         res = await api.post('/memory/dream');
       }

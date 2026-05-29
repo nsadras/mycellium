@@ -341,3 +341,23 @@ class LogStore:
             
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
+
+    def mark_unconsolidated(self, date_str: str) -> None:
+        path = self.logs_dir / f"{date_str}.md"
+        if not path.exists():
+            return
+            
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+            
+        import re
+        # Find all occurrences of **consolidated:** true and rewrite to false
+        pattern = re.compile(r"(\*\*consolidated:\*\* )true", re.MULTILINE)
+        content = pattern.sub(r"\g<1>false", content)
+        
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def mark_all_unconsolidated(self) -> None:
+        for path in self.logs_dir.glob("*.md"):
+            self.mark_unconsolidated(path.stem)

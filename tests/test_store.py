@@ -147,3 +147,117 @@ def test_log_store_update_decay(tmp_path):
     unconsolidated = store.get_unconsolidated()
     assert len(unconsolidated) == 1
     assert unconsolidated[0].decay_score == 0.75
+
+def test_mycelium_init_seeds_user_profile(tmp_path):
+    from mycelium.core import Mycelium
+    
+    myc = Mycelium(store_path=tmp_path)
+    
+    assert myc.wiki.exists("user-profile")
+    
+    page = myc.wiki.get("user-profile")
+    assert page.title == "User Profile"
+    assert page.decay_score == 0.0
+    assert page.confidence == 0.8
+    assert "profile" in page.tags
+    
+    index_content = myc.wiki.get_index()
+    assert "[[user-profile]]" in index_content
+
+def test_log_store_mark_unconsolidated(tmp_path):
+    store = LogStore(tmp_path / "logs")
+    
+    entry = LogEntry(
+        entry_id="2026-05-10#Entry 1",
+        session_id="ses-123",
+        timestamp=datetime(2026, 5, 10, 10, 0, 0),
+        content="User said hello.",
+        importance=0.5,
+        status="raw",
+        consolidated=False,
+        decay_score=1.0
+    )
+    
+    store.append(entry)
+    # Initially unconsolidated
+    assert len(store.get_unconsolidated()) == 1
+    
+    # Mark consolidated
+    store.mark_consolidated(["2026-05-10#Entry 1"])
+    assert len(store.get_unconsolidated()) == 0
+    
+    # Mark unconsolidated
+    store.mark_unconsolidated("2026-05-10")
+    unconsolidated = store.get_unconsolidated()
+    assert len(unconsolidated) == 1
+    assert unconsolidated[0].entry_id == "2026-05-10#Entry 1"
+    assert not unconsolidated[0].consolidated
+
+def test_clear_wiki_store(tmp_path, monkeypatch):
+    from mycelium.core import Mycelium
+    from server.runtime import clear_wiki_store
+    
+    myc = Mycelium(store_path=tmp_path)
+    monkeypatch.setattr("server.runtime.get_mem", lambda: myc)
+    
+    # Create consolidated log entry
+    from mycelium.models import LogEntry
+    entry = LogEntry(
+        entry_id="2026-05-10#Entry 1",
+        session_id="ses-123",
+        timestamp=datetime(2026, 5, 10, 10, 0, 0),
+        content="User said hello.",
+        importance=0.5,
+        status="raw",
+        consolidated=True,
+        decay_score=1.0
+    )
+    myc.log_store.append(entry)
+    assert len(myc.log_store.get_unconsolidated()) == 0
+    
+    from mycelium.models import WikiPage
+    myc.wiki.save(WikiPage(slug="page-a", title="Page A", content="", created=datetime.now(), last_updated=datetime.now(), version=1, confidence=1.0, decay_score=1.0, importance=1.0))
+    myc.wiki.save(WikiPage(slug="page-b", title="Page B", content="", created=datetime.now(), last_updated=datetime.now(), version=1, confidence=1.0, decay_score=1.0, importance=1.0))
+    myc.wiki.save_index("# Wiki Index\n\n## Pages\n- [[user-profile]]\n- [[page-a]]\n- [[page-b]]")
+    
+    assert myc.wiki.exists("page-a")
+    assert myc.wiki.exists("page-b")
+    assert myc.wiki.exists("user-profile")
+    
+    clear_wiki_store()
+    
+    assert not myc.wiki.exists("page-a")
+    assert not myc.wiki.exists("page-b")
+    assert myc.wiki.exists("user-profile")
+    
+    index_content = myc.wiki.get_index()
+    assert "[[user-profile]]" in index_content
+    assert "[[page-a]]" not in index_content
+    assert "[[page-b]]" not in index_content
+    
+    # Logs should be automatically marked as unconsolidated!
+    unconsolidated = myc.log_store.get_unconsolidated()
+    assert len(unconsolidated) == 1
+    assert not unconsolidated[0].consolidated
+
+@pytest.mark.asyncio
+async def test_delete_individual_wiki_page_api(tmp_path, monkeypatch):
+    from mycelium.core import Mycelium
+    from server.api.memory import delete_wiki_page
+    
+    myc = Mycelium(store_path=tmp_path)
+    monkeypatch.setattr("server.api.memory.get_mem", lambda: myc)
+    
+    from mycelium.models import WikiPage
+    myc.wiki.save(WikiPage(slug="target-page", title="Target", content="", created=datetime.now(), last_updated=datetime.now(), version=1, confidence=1.0, decay_score=1.0, importance=1.0))
+    myc.wiki.save_index("# Wiki Index\n\n## Pages\n- [[user-profile]]\n- [[target-page]]")
+    
+    assert myc.wiki.exists("target-page")
+    
+    await delete_wiki_page("target-page")
+    
+    assert not myc.wiki.exists("target-page")
+    
+    index_content = myc.wiki.get_index()
+    assert "[[target-page]]" not in index_content
+    assert "[[user-profile]]" in index_content

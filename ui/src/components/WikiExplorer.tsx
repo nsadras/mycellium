@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import { Search, Tag, Clock, ShieldCheck, ChevronRight, Book, History as HistoryIcon, Pencil, Save, X } from 'lucide-react';
+import { Search, Tag, Clock, ShieldCheck, ChevronRight, Book, History as HistoryIcon, Pencil, Save, X, Trash2 } from 'lucide-react';
 import api, { type WikiPage } from '../lib/api';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -86,6 +86,27 @@ export default function WikiExplorer() {
     }
   };
 
+  const handleDeletePage = async () => {
+    if (!pageData) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to delete the wiki page "${pageData.title}"? This will archive the page and remove it from the index.`
+    );
+    if (!confirmed) return;
+    
+    try {
+      await api.delete(`/memory/wiki/${pageData.slug}`);
+      alert(`Success: Wiki page "${pageData.title}" deleted.`);
+      
+      const deletedSlug = pageData.slug;
+      setPageData(null);
+      setSelectedSlug(null);
+      setPages(prev => prev.filter(p => p.slug !== deletedSlug));
+    } catch (err) {
+      console.error("Failed to delete page", err);
+      alert("Failed to delete the page. Please check the backend logs.");
+    }
+  };
+
   const filteredPages = pages.filter(p => 
     p.title.toLowerCase().includes(search.toLowerCase()) || 
     p.slug.toLowerCase().includes(search.toLowerCase())
@@ -164,12 +185,22 @@ export default function WikiExplorer() {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={startEdit}
-                    className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-                  >
-                    <Pencil size={14} /> Edit
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDeletePage}
+                      className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-rose-400 hover:bg-rose-950/40 hover:text-rose-200 transition-colors cursor-pointer"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startEdit}
+                      className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                    >
+                      <Pencil size={14} /> Edit
+                    </button>
+                  </div>
                 )}
               </div>
               {isEditing ? (

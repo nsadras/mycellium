@@ -367,3 +367,35 @@ def clear_memory_store() -> dict[str, int]:
         counts["sessions_reset"] += 1
     save_meta(meta)
     return counts
+
+
+def clear_wiki_store() -> dict[str, int]:
+    mem = get_mem()
+    counts = {
+        "wiki_pages_deleted": 0,
+        "archived_pages_deleted": 0,
+        "logs_marked_unconsolidated": 0,
+    }
+
+    wiki_dir = mem.store_path / "wiki"
+    archive_dir = wiki_dir / "_archive"
+
+    for path in wiki_dir.glob("*.md"):
+        if path.name == "_index.md":
+            continue
+        path.unlink()
+        counts["wiki_pages_deleted"] += 1
+
+    for path in archive_dir.glob("*.md"):
+        path.unlink()
+        counts["archived_pages_deleted"] += 1
+
+    # Mark all event logs as unconsolidated to support seamless rebuilds
+    log_files = list(mem.log_store.logs_dir.glob("*.md"))
+    mem.log_store.mark_all_unconsolidated()
+    counts["logs_marked_unconsolidated"] = len(log_files)
+
+    mem.wiki.save_index("# Wiki Index\n\n_last updated: never_\n\n## Pages\n")
+    mem._ensure_user_profile() # Auto-seed the profile page immediately
+
+    return counts

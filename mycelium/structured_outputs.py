@@ -30,10 +30,11 @@ class RoutingOutput(RootModel[list[RoutingSelectionOutput]]):
 class ConsolidationTargetOutput(BaseModel):
     page: str
     action: Literal["update", "create", "none"]
+    log_entry_ids: list[str] = []
 
 
-class ConsolidationIdentifyOutput(RootModel[list[ConsolidationTargetOutput]]):
-    pass
+class ConsolidationIdentifyOutput(BaseModel):
+    targets: list[ConsolidationTargetOutput]
 
 
 class RelatedEdgeOutput(BaseModel):

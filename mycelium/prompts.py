@@ -45,17 +45,39 @@ Return a JSON object with a single "entries" field containing a list of these ob
 def consolidation_identify_prompt(index_content: str, log_entries: str) -> tuple[str, str]:
     system = """You are a memory consolidation agent. Given recent log entries, identify which existing wiki pages are affected by new information, and whether any new pages need to be created.
 
-Group related log entries into the smallest useful set of semantic pages. Do not create one page per log entry.
+Group related log entries into distinct, highly focused semantic pages. Each page should target a single specific concept, project, tool, or area of user interest (e.g. `react-agent-loop`, `user-profile`, `typescript-port`). Do not create one page per log entry, but also do not over-merge unrelated logs.
+
+CRITICAL: Avoid creating a single broad catch-all page (such as `knowledge-graph-summary`, `general-notes`, or `mycelium-development`) to dump unrelated logs. If the log entries cover genuinely separate topics (such as search observations, coding frameworks, user preferences, and distinct system tests), you MUST identify separate, highly focused wiki pages for each distinct topic.
+
 Prefer updating an existing page from the wiki index when the new information fits its topic, even if the fit is approximate.
 Create a new page only when no existing page can reasonably absorb the information.
 Use stable lowercase slug names with hyphens, for example "user-profile" or "reinforcement-learning". Do not return placeholder names like "Page 1", "Topic A", or "New Page".
 If multiple log entries concern the same theme, return one page target for that theme.
 
+- The central `user-profile` page should ONLY receive user-specific personal details, style preferences, project configurations, background, goals, or custom instructions. Do NOT consolidate technical, generic tool observations, or general agent loop architecture details into the `user-profile` page. Create separate descriptive wiki pages for those technical concepts (e.g. `agent-harness-anatomy`, `react-agent-loop`, `paper-review-agentic-benchmarks`).
+
 Important: Log entries with IDs starting with 'tool-' contain direct system tool observations (such as web search or fetch results). Carefully analyze these search results. Extract specific, factual, and actionable details discovered during these queries (e.g., specific library syntax, API specifications, hardware details, or custom scientific facts requested by the user) and identify appropriate wiki pages to create or update to store this permanent knowledge.
 
-Return a JSON list of objects, each with:
-- "page": the slug of the wiki page
+Return a JSON object with a single "targets" field containing a list of objects, where each object contains:
+- "page": the lowercase, hyphenated slug of the wiki page. You MUST use a descriptive slug name representing the specific topic. NEVER return a number, a single letter, or a placeholder like "1", "2", "Page A", or "New Page".
 - "action": one of "update", "create", or "none"
+- "log_entry_ids": a list of the exact raw string IDs of the specific log entries (e.g., ["2026-05-28#Prologue", "2026-05-28#entry-97bccd56"]) containing information relevant to this page. You must output the exact entry ID string as it appears in the log. Only map a log entry to a page if that log entry actually contains information relevant to that page.
+
+Example response format:
+{
+  "targets": [
+    {
+      "page": "user-profile",
+      "action": "update",
+      "log_entry_ids": ["2026-05-28#entry-123"]
+    },
+    {
+      "page": "agent-harness-anatomy",
+      "action": "create",
+      "log_entry_ids": ["2026-05-28#Prologue", "2026-05-28#Chapter 1 · What Is a Harness"]
+    }
+  ]
+}
 
 Respond with valid JSON only. No markdown code fences, no explanation, no preamble."""
     user = f"""WIKI INDEX:
@@ -72,6 +94,7 @@ Rules:
 - CAPTURE TOOL RESULTS: Log entries with IDs starting with 'tool-' contain direct system tool observations (such as web search or page fetch results). Integrate any fresh factual discoveries, library version numbers, specific API specifications, or technical details uncovered by these tools into the wiki page to preserve them in permanent context. Do not ignore these search discoveries; they represent the exact new factual information retrieved because it wasn't in your weights!
 - ABSTRACT EVENTS, PRESERVE DETAILS: When processing logs, abstract the specific chat turn, but do NOT strip away crucial actionable details like custom file names, custom directories, variable names, or hardware models. Preserve these specifics, but write them as durable facts rather than episodic stories (e.g. write 'The BCI project uses a custom POMDP loop' rather than 'The user said they want to use POMDP').
 - AVOID EPISODIC STORIES: Do not write pages as a chronological diary of your chats (e.g. skip 'On May 28, the user asked...'). Write them as structured technical documents or profile cards describing the current status, configurations, and design specifications of the user's project.
+- FOCUS ON THE SPECIFIC TOPIC: Extract and integrate ONLY the facts from the log entries that are directly relevant to the specific title, slug, and theme of this page. Ignore log entries that belong to other, unrelated wiki topics.
 - Keep the page focused on one coherent semantic topic. Do not produce the same broad page title for unrelated slugs.
 - Resolve conflicts explicitly: if new info contradicts existing content, choose the more recent/credible version and note the revision.
 - Update confidence score based on how much evidence now supports this.

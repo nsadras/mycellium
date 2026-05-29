@@ -47,6 +47,7 @@ class Mycelium:
             
         self._wiki = WikiStore(self.store_path / "wiki")
         self._log_store = LogStore(self.store_path / "logs")
+        self._ensure_user_profile()
         self.llm = OllamaClient(
             url=self.config.llm.url,
             model=self.config.llm.model,
@@ -59,6 +60,43 @@ class Mycelium:
         
         from mycelium.dream import DreamProcess
         self.dream_process = DreamProcess(self.llm, self._wiki, self._log_store, self.config)
+
+    def _ensure_user_profile(self) -> None:
+        if not self._wiki.exists("user-profile"):
+            from mycelium.models import WikiPage
+            from datetime import datetime
+            
+            profile_page = WikiPage(
+                slug="user-profile",
+                title="User Profile",
+                content="Central repository for user preferences, background, plans, and custom instructions.",
+                created=datetime.now(),
+                last_updated=datetime.now(),
+                version=1,
+                confidence=0.8,
+                decay_score=0.0,  # User profile should never decay
+                importance=1.0,
+                tags=["profile", "personalization"],
+                related=[]
+            )
+            self._wiki.save(profile_page)
+            
+            # Register in the index if not present
+            index_content = self._wiki.get_index()
+            if "[[user-profile]]" not in index_content:
+                lines = index_content.splitlines()
+                pages_header_idx = -1
+                for idx, line in enumerate(lines):
+                    if line.strip().startswith("## Pages"):
+                        pages_header_idx = idx
+                        break
+                
+                profile_line = "- [[user-profile]]: Central repository for user preferences, background, plans, and custom instructions."
+                if pages_header_idx != -1:
+                    lines.insert(pages_header_idx + 1, profile_line)
+                else:
+                    lines.append(profile_line)
+                self._wiki.save_index("\n".join(lines))
 
     def _init_store(self) -> None:
         self.store_path.mkdir(parents=True, exist_ok=True)

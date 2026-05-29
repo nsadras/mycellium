@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from mycelium.models import UpdateLogEntry
 from server.runtime import (
     clear_memory_store,
+    clear_wiki_store,
     flush_idle_episodes,
     flush_session_episode,
     get_mem,
@@ -107,22 +108,59 @@ async def update_wiki_page(slug: str, req: WikiPageUpdate):
         "update_log": [{"version": u.version, "reason": u.reason, "date": u.date.isoformat()} for u in page.update_log],
     }
 
+@router.delete("/wiki/{slug}")
+async def delete_wiki_page(slug: str):
+    mem = get_mem()
+    if not mem.wiki.exists(slug):
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    # Archive/soft-delete
+    mem.wiki.archive(slug)
+    
+    # Remove from index file
+    index_content = mem.wiki.get_index()
+    lines = index_content.splitlines()
+    new_lines = []
+    for line in lines:
+        if f"[[{slug}]]" not in line:
+            new_lines.append(line)
+    mem.wiki.save_index("\n".join(new_lines))
+    
+    return {"slug": slug, "status": "success"}
+
 @router.get("/logs")
 async def list_logs():
-    logs_dir = Path("./mnemos_store/logs")
+    mem = get_mem()
+    logs_dir = mem.log_store.logs_dir
     if not logs_dir.exists():
         return []
-    return [f.name for f in logs_dir.glob("*.md")]
+    return [f.name for f in sorted(logs_dir.glob("*.md"), reverse=True)]
 
 @router.get("/logs/{filename}")
 async def get_log_content(filename: str):
     if "/" in filename or "\\" in filename or not filename.endswith(".md"):
         raise HTTPException(status_code=400, detail="Invalid log filename")
-    log_path = Path("./mnemos_store/logs") / filename
+    mem = get_mem()
+    log_path = mem.log_store.logs_dir / filename
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Log not found")
     with open(log_path, "r", encoding="utf-8") as f:
         return {"filename": filename, "content": f.read()}
+
+@router.post("/logs/{filename}/unconsolidate")
+async def unconsolidate_log(filename: str):
+    if "/" in filename or "\\" in filename or not filename.endswith(".md"):
+        raise HTTPException(status_code=400, detail="Invalid log filename")
+    
+    date_str = filename.replace(".md", "")
+    mem = get_mem()
+    mem.log_store.mark_unconsolidated(date_str)
+    
+    log_path = mem.log_store.logs_dir / filename
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="Log not found")
+    with open(log_path, "r", encoding="utf-8") as f:
+        return {"filename": filename, "content": f.read(), "status": "success"}
 
 @router.post("/dream")
 async def run_dream():
@@ -137,6 +175,11 @@ async def decay():
 @router.post("/dev/clear")
 async def clear_memory():
     return clear_memory_store()
+
+
+@router.post("/dev/clear-wiki")
+async def clear_wiki():
+    return clear_wiki_store()
 
 
 @router.post("/episodes/flush")
