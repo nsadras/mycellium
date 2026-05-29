@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useRef, memo, type FormEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
@@ -66,6 +66,51 @@ function ToolEvents({ events }: { events: NonNullable<Message['tool_events']> })
     </div>
   );
 }
+
+const ChatMessageItem = memo(function ChatMessageItem({ m }: { m: Message }) {
+  return (
+    <div className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
+      <div className={cn(
+        "max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm",
+        m.role === 'user' 
+          ? "bg-indigo-600 text-white rounded-br-none" 
+          : "bg-slate-100 text-slate-800 rounded-bl-none"
+      )}>
+        <div className="font-bold text-[10px] uppercase mb-1 opacity-70">
+          {m.role}
+        </div>
+        {m.role === 'user' ? (
+          <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+        ) : (
+          <>
+            {m.loaded_pages && m.loaded_pages.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-1.5 border-b border-slate-200 pb-2">
+                {m.loaded_pages.map((page) => (
+                  <span
+                    key={page.slug}
+                    title={`${page.slug} v${page.version}`}
+                    className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 ring-1 ring-indigo-100"
+                  >
+                    <BookOpen size={11} />
+                    {page.title}
+                  </span>
+                ))}
+              </div>
+            )}
+            {m.tool_events && m.tool_events.length > 0 && (
+              <ToolEvents events={m.tool_events} />
+            )}
+            <div className="prose prose-sm prose-slate max-w-none prose-chat">
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                {m.content}
+              </ReactMarkdown>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+});
 
 interface ChatProps {
   sessions: Session[];
@@ -247,46 +292,7 @@ export default function Chat({ sessions, selectedId, onSelect, onCreate, onRenam
             </div>
           ) : (
             messages.map((m, i) => (
-              <div key={i} className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
-                <div className={cn(
-                  "max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm",
-                  m.role === 'user' 
-                    ? "bg-indigo-600 text-white rounded-br-none" 
-                    : "bg-slate-100 text-slate-800 rounded-bl-none"
-                )}>
-                  <div className="font-bold text-[10px] uppercase mb-1 opacity-70">
-                    {m.role}
-                  </div>
-                  {m.role === 'user' ? (
-                    <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
-                  ) : (
-                    <>
-                      {m.loaded_pages && m.loaded_pages.length > 0 && (
-                        <div className="mb-3 flex flex-wrap gap-1.5 border-b border-slate-200 pb-2">
-                          {m.loaded_pages.map((page) => (
-                            <span
-                              key={page.slug}
-                              title={`${page.slug} v${page.version}`}
-                              className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-[10px] font-semibold text-indigo-600 ring-1 ring-indigo-100"
-                            >
-                              <BookOpen size={11} />
-                              {page.title}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {m.tool_events && m.tool_events.length > 0 && (
-                        <ToolEvents events={m.tool_events} />
-                      )}
-                      <div className="prose prose-sm prose-slate max-w-none prose-chat">
-                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                          {m.content}
-                        </ReactMarkdown>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
+              <ChatMessageItem key={i} m={m} />
             ))
           )}
           {isLoading && (

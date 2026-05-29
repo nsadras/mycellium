@@ -157,6 +157,7 @@ class Mycelium:
                 await self.dream()
 
     async def dream(self, **kwargs) -> DreamReport:
+        kwargs.setdefault('conflict_policy', self.config.dream.conflict_policy)
         return await self.dream_process.run(**kwargs)
 
     async def encode(self, content: str, **kwargs) -> LogEntry:
