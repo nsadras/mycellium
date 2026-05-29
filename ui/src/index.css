@@ -41,4 +41,177 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #060807;
+  color: #f1f5f9;
+}
+
+/* Global Frosted Glassmorphism membrane overrides */
+.glass-membrane,
+.bg-white {
+  background: rgba(9, 13, 11, 0.72) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1px solid rgba(16, 185, 129, 0.16) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45) !important;
+}
+
+.bg-slate-900 {
+  background: rgba(7, 10, 9, 0.76) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border-right: 1px solid rgba(16, 185, 129, 0.16) !important;
+  box-shadow: 4px 0 24px 0 rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Base slate adjustments for dark theme */
+.bg-slate-50 {
+  background-color: transparent !important;
+}
+
+.bg-slate-100 {
+  background-color: rgba(18, 25, 22, 0.8) !important;
+}
+
+.border-slate-200,
+.border-slate-100,
+.border-slate-800 {
+  border-color: rgba(16, 185, 129, 0.15) !important;
+}
+
+/* Dark mode text colors override */
+.text-slate-900,
+.text-slate-800,
+.text-slate-700 {
+  color: #f1f5f9 !important;
+}
+
+.text-slate-600,
+.text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.text-slate-400,
+.text-slate-300 {
+  color: #cbd5e1 !important;
+}
+
+/* Active bioluminescent colors (indigo/emerald override) */
+.bg-indigo-600 {
+  background-color: #059669 !important; /* Emerald 600 */
+  color: #ffffff !important;
+  border: 1px solid rgba(52, 211, 153, 0.3) !important;
+}
+
+.bg-indigo-600:hover {
+  background-color: #047857 !important; /* Emerald 700 */
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4) !important;
+}
+
+.bg-indigo-50 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+}
+
+.text-indigo-600,
+.text-indigo-700,
+.text-indigo-500,
+.text-indigo-400 {
+  color: #34d399 !important; /* Mint/Emerald light accent */
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.3);
+}
+
+.ring-indigo-100 {
+  --tw-ring-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+.focus\:ring-indigo-500:focus {
+  --tw-ring-color: #10b981 !important;
+}
+
+.shadow-indigo-500\/20 {
+  box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.2) !important;
+}
+
+/* Hover highlights for lists and sidebar tabs */
+.hover\:bg-slate-50:hover,
+.hover\:bg-slate-800:hover {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+  color: #ffffff !important;
+}
+
+.bg-slate-800 {
+  background-color: rgba(16, 185, 129, 0.14) !important;
+  border-left: 2px solid #10b981;
+  color: #ffffff !important;
+}
+
+/* Custom interactive bio-scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(16, 185, 129, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.45);
+}
+
+/* Input elements styling */
+input,
+textarea,
+select {
+  background-color: rgba(12, 17, 15, 0.9) !important;
+  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+  color: #ffffff !important;
+  border-radius: 8px !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25) !important;
+}
+
+::placeholder {
+  color: rgba(148, 163, 184, 0.45) !important;
+}
+
+/* Markdown prose restyling */
+.prose-chat h1, .prose-chat h2, .prose-chat h3, .prose-chat h4 {
+  color: #ffffff !important;
+}
+
+.prose-chat th {
+  background-color: rgba(18, 25, 22, 0.92) !important;
+  color: #ffffff !important;
+  border-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+.prose-chat td {
+  border-color: rgba(16, 185, 129, 0.15) !important;
+  color: #cbd5e1 !important;
+}
+
+.prose-chat a {
+  color: #34d399 !important;
+  text-decoration: underline;
+}
+
+/* Obsidian wikilink highlighting */
+.prose-chat a[href^="[["] {
+  color: #34d399 !important;
+  font-weight: 700;
+  text-decoration: none;
+  border-bottom: 1px dashed #10b981;
+}
+
+.prose-chat a[href^="[["]:hover {
+  background: rgba(16, 185, 129, 0.1);
+  border-bottom-style: solid;
 }

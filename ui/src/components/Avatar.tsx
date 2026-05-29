@@ -84,9 +84,7 @@ export default function Avatar({ status }: { status: AssistantStatus }) {
         "group relative mx-4 mb-4 rounded-xl border p-3.5 transition-all duration-300 overflow-hidden",
         status.activity === 'error'
           ? "border-rose-900/60 bg-rose-950/20 shadow-lg shadow-rose-950/25"
-          : active
-            ? "border-indigo-800/80 bg-slate-800/60 shadow-lg shadow-indigo-950/25"
-            : "border-slate-800/80 bg-slate-950/20"
+          : "border-slate-800/80 bg-slate-950/20"
       )}
       aria-live="polite"
     >

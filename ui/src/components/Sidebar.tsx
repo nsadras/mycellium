@@ -83,8 +83,16 @@ export default function Sidebar({
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col">
       <div className="p-6 flex items-center gap-3">
-        <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center text-white">
-          <Sparkles size={20} />
+        <div className="w-8 h-8 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center justify-center text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.15)]">
+          <svg
+            viewBox="14 10 132 132"
+            className="w-5 h-5 fill-current"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <path d="M 50,75 C 50,110 56,128 65,128 C 72,128 74,120 80,120 C 86,120 88,128 95,128 C 104,128 110,110 110,75 Z" />
+            <path d="M 20,70 C 20,32 45,18 80,18 C 115,18 140,32 140,70 C 140,84 115,88 80,88 C 45,88 20,84 20,70 Z" />
+          </svg>
         </div>
         <h1 className="text-xl font-bold text-white tracking-tight">Mycelium</h1>
       </div>

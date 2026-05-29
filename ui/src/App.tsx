@@ -4,6 +4,7 @@ import Chat from './components/Chat';
 import WikiExplorer from './components/WikiExplorer';
 import LogExplorer from './components/LogExplorer';
 import Sidebar from './components/Sidebar';
+import SporeBackground from './components/SporeBackground';
 import { idleStatus, type AssistantActivity, type AssistantStatus } from './lib/assistantStatus';
 
 const memoryOperationStatus: Record<
@@ -132,7 +133,8 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
+    <div className="relative flex h-screen text-slate-100 overflow-hidden z-10">
+      <SporeBackground />
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -143,7 +145,7 @@ function App() {
         assistantStatus={assistantStatus}
       />
       
-      <main className="flex-1 flex flex-col min-w-0 h-full">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative z-10">
         {activeTab === 'chat' && (
           <Chat 
             sessions={sessions}
