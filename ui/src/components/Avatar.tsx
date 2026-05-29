@@ -38,6 +38,16 @@ export default function Avatar({ status }: { status: AssistantStatus }) {
     }
   });
   const [showSelector, setShowSelector] = useState(false);
+  const [clickActivity, setClickActivity] = useState<AssistantActivity | null>(null);
+
+  const handleAvatarClick = () => {
+    if (clickActivity) return;
+    const randomDir = Math.random() < 0.5 ? 'clicked-left' : 'clicked-right';
+    setClickActivity(randomDir);
+    setTimeout(() => {
+      setClickActivity(null);
+    }, 800);
+  };
 
   const copy = activityCopy[status.activity];
   const label = status.label ?? copy.label;
@@ -150,9 +160,16 @@ export default function Avatar({ status }: { status: AssistantStatus }) {
       ) : (
         /* Display avatar and status details vertically (centered) */
         <div className="flex flex-col items-center gap-3">
-          <div className="relative flex h-40 w-40 shrink-0 items-center justify-center">
+          <div
+            onClick={handleAvatarClick}
+            className={cn(
+              "relative flex h-40 w-40 shrink-0 items-center justify-center cursor-pointer active:scale-95 transition-transform duration-200",
+              clickActivity && "pointer-events-none"
+            )}
+            title="Click me!"
+          >
             <span className="relative w-full h-full flex items-center justify-center">
-              <AvatarComponent activity={status.activity} status={status} />
+              <AvatarComponent activity={clickActivity || status.activity} status={status} />
             </span>
           </div>
           

@@ -6,6 +6,8 @@ export default function MycoAvatar({ activity }: AvatarProps) {
   if (activity === 'listening') mascotClass = "animate-bob"; // Listening uses more apparent bobbing
   else if (activity === 'thinking') mascotClass = "animate-ponder";
   else if (activity === 'dreaming') mascotClass = "animate-sleep";
+  else if (activity === 'clicked-left') mascotClass = "animate-click-squish-left";
+  else if (activity === 'clicked-right') mascotClass = "animate-click-squish-right";
 
   return (
     <svg
@@ -149,6 +151,32 @@ export default function MycoAvatar({ activity }: AvatarProps) {
         .error-glow {
           animation: pulse-red 0.8s ease-in-out infinite alternate;
         }
+
+        @keyframes click-squish-left {
+          0% { transform: scale(1) translateY(0px); }
+          15% { transform: scale(1.18, 0.8) translateY(4px); }
+          40% { transform: scale(0.85, 1.18) translateY(-10px) rotate(-7deg); }
+          60% { transform: scale(1.06, 0.92) translateY(2px) rotate(5deg); }
+          80% { transform: scale(0.97, 1.03) translateY(-1px) rotate(-1deg); }
+          100% { transform: scale(1) translateY(0px) rotate(0deg); }
+        }
+        .animate-click-squish-left {
+          animation: click-squish-left 0.8s cubic-bezier(0.25, 0.8, 0.25, 1);
+          transform-origin: 80px 130px;
+        }
+
+        @keyframes click-squish-right {
+          0% { transform: scale(1) translateY(0px); }
+          15% { transform: scale(1.18, 0.8) translateY(4px); }
+          40% { transform: scale(0.85, 1.18) translateY(-10px) rotate(7deg); }
+          60% { transform: scale(1.06, 0.92) translateY(2px) rotate(-5deg); }
+          80% { transform: scale(0.97, 1.03) translateY(-1px) rotate(1deg); }
+          100% { transform: scale(1) translateY(0px) rotate(0deg); }
+        }
+        .animate-click-squish-right {
+          animation: click-squish-right 0.8s cubic-bezier(0.25, 0.8, 0.25, 1);
+          transform-origin: 80px 130px;
+        }
       `}</style>
 
       {/* 1. BACKGROUND EFFECT PLANES */}
@@ -187,8 +215,22 @@ export default function MycoAvatar({ activity }: AvatarProps) {
         {/* C. Blush */}
         {activity !== 'dreaming' && activity !== 'decaying' && (
           <g>
-            <ellipse cx="60" cy="97" rx="5.5" ry="3.5" fill={activity === 'error' ? "#ef4444" : "#e8a9a9"} opacity={activity === 'error' ? 0.35 : 0.5} />
-            <ellipse cx="100" cy="97" rx="5.5" ry="3.5" fill={activity === 'error' ? "#ef4444" : "#e8a9a9"} opacity={activity === 'error' ? 0.35 : 0.5} />
+            <ellipse 
+              cx="60" 
+              cy="97" 
+              rx={activity.startsWith('clicked') ? "7" : "5.5"} 
+              ry={activity.startsWith('clicked') ? "4.5" : "3.5"} 
+              fill={activity === 'error' ? "#ef4444" : activity.startsWith('clicked') ? "#ff8e8e" : "#e8a9a9"} 
+              opacity={activity === 'error' ? 0.35 : activity.startsWith('clicked') ? 0.75 : 0.5} 
+            />
+            <ellipse 
+              cx="100" 
+              cy="97" 
+              rx={activity.startsWith('clicked') ? "7" : "5.5"} 
+              ry={activity.startsWith('clicked') ? "4.5" : "3.5"} 
+              fill={activity === 'error' ? "#ef4444" : activity.startsWith('clicked') ? "#ff8e8e" : "#e8a9a9"} 
+              opacity={activity === 'error' ? 0.35 : activity.startsWith('clicked') ? 0.75 : 0.5} 
+            />
           </g>
         )}
 
@@ -204,6 +246,14 @@ export default function MycoAvatar({ activity }: AvatarProps) {
           <g>
             <path d="M 64,95 Q 68.5,90 73,95" stroke="#2c3531" strokeWidth="2.5" strokeLinecap="round" fill="none" />
             <path d="M 87,95 Q 91.5,90 96,95" stroke="#2c3531" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+          </g>
+        ) : activity.startsWith('clicked') ? (
+          // Cute squinting >_< eyes
+          <g>
+            {/* > left eye */}
+            <path d="M 64,91.5 L 70,94.5 L 64,97.5" stroke="#2c3531" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            {/* < right eye */}
+            <path d="M 96,91.5 L 90,94.5 L 96,97.5" stroke="#2c3531" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </g>
         ) : activity === 'error' ? (
           // Worried / sad eyes and eyebrows
@@ -230,6 +280,9 @@ export default function MycoAvatar({ activity }: AvatarProps) {
         ) : activity === 'thinking' ? (
           // Confused / o-mouth
           <circle cx="80" cy="98" r="2.5" fill="#2c3531" />
+        ) : activity.startsWith('clicked') ? (
+          // Underscore _ mouth for >_<
+          <line x1="77" y1="99" x2="83" y2="99" stroke="#2c3531" strokeWidth="2.5" strokeLinecap="round" />
         ) : activity === 'error' ? (
           // Sad frown
           <path d="M 77,100 Q 80,97 83,100" stroke="#2c3531" strokeWidth="1.8" strokeLinecap="round" fill="none" />
